@@ -1,0 +1,16 @@
+project_id = "schegpkwfwkgfmmpnzic"
+
+[functions.xau-monitor]
+verify_jwt = false
+
+[functions.get-live-price]
+verify_jwt = false
+
+[functions.dashboard]
+verify_jwt = false
+
+[functions.send-entry-alert]
+verify_jwt = false
+
+[functions.backup-to-drive]
+verify_jwt = false
