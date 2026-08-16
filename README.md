@@ -1,29 +1,45 @@
-# Gold Sniper
+# 🎯 Gold Sniper
 
 EMA 9/21 crossover gold trading system with ATR-based SL/TP levels across 5 timeframes (1M, 5M, 15M, 1H, 4H).
 
-## Components
+## 🔴 Live Dashboard
 
-- `backend-functions/xauMonitor.ts` — 24/7 monitoring: fetches gold prices, detects EMA crossovers, checks TP/SL hits
-- `backend-functions/getLivePrice.ts` — Live price endpoint for dashboard polling
-- `backend-functions/dashboard.ts` — Serves the Gold Sniper dashboard HTML
-- `backend-functions/sendEntryAlert.ts` — Receives alerts and saves to Alert entity
-- `backend-functions/backupToDrive.ts` — Auto-backup to Google Drive every 6 hours
-- `dashboard/gold_sniper.html` — Offline-capable dashboard with live price feed
-- `apk/assets/dashboard.html` — APK-bundled offline dashboard
+**[https://shubhampawar3752-26yr.github.io/gold-sniper/](https://shubhampawar3752-26yr.github.io/gold-sniper/)**
+
+Real-time gold price, active trades, and TP progress — polls Supabase every 5 seconds.
 
 ## Architecture
 
-- **Monitor**: Scheduled every 5 min, fetches Yahoo Finance gold prices, checks EMA 9/21 crossover with 5-candle lookback
-- **Alerts**: Entity-triggered workflow sends WhatsApp messages on entry/TP/SL/cycle completion
-- **Dashboard**: Polls getLivePrice every 5 seconds for real-time price + active trades
-- **Backup**: Google Drive auto-backup every 6 hours (Alert + TradingState entities)
-- **APK**: Signed Android app with bundled offline dashboard
+- **Monitor**: pg_cron runs `xau-monitor` every 5 min — fetches Yahoo Finance gold prices, detects EMA 9/21 crossovers with 5-candle lookback
+- **Alerts**: Database trigger on `alerts` table → `send-whatsapp-alert` edge function → WhatsApp delivery
+- **Dashboard**: `index.html` polls `get-live-price` endpoint every 5s for real-time price + active trades
+- **Backup**: pg_cron runs `backup-to-drive` every 6 hours — exports to Google Drive
+- **Hosting**: GitHub Pages (this repo) + Supabase Edge Functions
+
+## Supabase Edge Functions
+
+| Function | Purpose |
+|----------|---------|
+| `xau-monitor` | 24/7 monitoring: price fetch, EMA crossover detection, TP/SL checks |
+| `get-live-price` | Live price endpoint for dashboard polling |
+| `dashboard` | Alternate dashboard served from Supabase |
+| `send-whatsapp-alert` | WhatsApp alert delivery via Base44 Agent API |
+| `backup-to-drive` | Google Drive auto-backup every 6 hours |
 
 ## Tech Stack
 
-- Base44 backend (Deno/TypeScript)
+- Supabase (Postgres, Edge Functions, pg_cron, pg_net)
 - Yahoo Finance API for gold prices
 - WhatsApp for alert delivery
 - Google Drive for backups
-- GitHub for version control
+- GitHub Pages for dashboard hosting
+
+## Dashboard Features
+
+- Live gold price with up/down flash animation
+- Active trade cards with entry, SL, ATR, and TP progress
+- TP progress bars (0-100%)
+- Market state indicator (OPEN/CLOSED)
+- Feed status badge (LIVE/OFFLINE)
+- Auto-refresh every 5 seconds
+- Mobile responsive
