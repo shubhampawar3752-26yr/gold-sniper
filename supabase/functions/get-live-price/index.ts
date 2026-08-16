@@ -1,4 +1,5 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
+const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 async function fetchLivePrice(symbol = 'GC=F') {
   try {
@@ -21,20 +22,25 @@ async function fetchLivePrice(symbol = 'GC=F') {
 Deno.serve(async (req) => {
   const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
-  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
   const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
   const live = await fetchLivePrice('GC=F');
   if (!live) return new Response(JSON.stringify({ success: false, error: 'Failed to fetch live price', timestamp: now }), { status: 503, headers });
-  let states = null, lastRun = null, lastTick = null;
+
+  let states: any = null, lastRun: string | null = null, lastTick: any = null;
   try {
-    const { data } = await supabase.from('trading_states').select('*').limit(1);
+    const r = await fetch(`${SUPA_URL}/rest/v1/trading_states?select=*&limit=1`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
+    });
+    const data = await r.json();
     if (data && data.length > 0) {
       states = data[0].states || {};
       lastRun = data[0].last_run || null;
       lastTick = states?.__ticks || null;
     }
-  } catch (e) { console.error('Error loading state:', e.message); }
-  const activeTrades = [];
+  } catch (e) { console.error('Error loading state:', (e as Error).message); }
+
+  const activeTrades: any[] = [];
   if (states) {
     for (const key of Object.keys(states)) {
       if (key === '__ticks') continue;
@@ -44,5 +50,6 @@ Deno.serve(async (req) => {
       }
     }
   }
+
   return new Response(JSON.stringify({ success: true, timestamp: now, price: live.price, prevClose: live.prevClose, change: live.change, changePct: live.changePct, marketState: live.marketState, marketTime: live.timestamp, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length }), { status: 200, headers });
 });
