@@ -3,8 +3,9 @@ const TFS = [
   { l: '1M', i: '1m', r: '1d' },
   { l: '5M', i: '5m', r: '5d' },
   { l: '15M', i: '15m', r: '5d' },
-  { l: '1H', i: '1h', r: '1mo' },
-  { l: '4H', i: '1h', r: '3mo', agg: true },
+  { l: '30M', i: '30m', r: '1d' },
+  { l: '1H', i: '60m', r: '1mo' },
+  { l: '4H', i: '60m', r: '3mo', agg: true },
 ];
 const TICKS = 3, TICK_MS = 10000;
 
@@ -127,7 +128,6 @@ function setLevels(s: any, a: number) {
   [1, 2, 3, 5, 8].forEach((v, i) => { s['tp' + (i + 1)] = s.dir === 'long' ? s.entry + r * v : s.entry - r * v; });
 }
 
-// Supabase REST API helpers (no external import needed)
 async function supaSelect(table: string, limit = 1) {
   const r = await fetch(`${SUPA_URL}/rest/v1/${table}?select=*&limit=${limit}`, {
     headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
