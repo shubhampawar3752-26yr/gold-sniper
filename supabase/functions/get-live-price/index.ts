@@ -1,21 +1,33 @@
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 
-async function fetchLivePrice(symbol = 'GC=F') {
+async function fetchLivePrice() {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=5m`;
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } });
+    const url = `https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (!r.ok) return null;
     const data = await r.json();
-    const result = data?.chart?.result?.[0];
-    if (!result) return null;
-    const meta = result.meta || {};
-    const price = meta.regularMarketPrice;
-    const prevClose = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPreviousClose || 0;
-    if (typeof price !== 'number' || price <= 0) return null;
+    if (!data || data.status === 'error') return null;
+    const price = parseFloat(data.price);
+    if (isNaN(price) || price <= 0) return null;
+    return { price, prevClose: 0, change: 0, changePct: 0, marketState: 'open', timestamp: Math.floor(Date.now() / 1000) };
+  } catch (e) { return null; }
+}
+
+async function fetchQuote() {
+  try {
+    const url = `https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!data || data.status === 'error') return null;
+    const price = parseFloat(data.close);
+    const prevClose = parseFloat(data.previous_close);
+    if (isNaN(price) || price <= 0) return null;
     const change = prevClose > 0 ? price - prevClose : 0;
     const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-    return { price, prevClose, change, changePct, marketState: meta.marketState || 'unknown', timestamp: meta.regularMarketTime || Math.floor(Date.now() / 1000) };
+    return { price, prevClose: prevClose || 0, change, changePct, marketState: data.is_market_open ? 'open' : 'closed', timestamp: Math.floor(Date.now() / 1000) };
   } catch (e) { return null; }
 }
 
@@ -24,7 +36,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
 
   const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
-  const live = await fetchLivePrice('GC=F');
+  let live = await fetchQuote();
+  if (!live) live = await fetchLivePrice();
   if (!live) return new Response(JSON.stringify({ success: false, error: 'Failed to fetch live price', timestamp: now }), { status: 503, headers });
 
   let states: any = null, lastRun: string | null = null, lastTick: any = null;
@@ -40,7 +53,6 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error('Error loading state:', (e as Error).message); }
 
-  // Fetch trade history from alerts table (last 20 non-test alerts, newest first)
   let tradeHistory: any[] = [];
   try {
     const r = await fetch(`${SUPA_URL}/rest/v1/alerts?select=id,type,timeframe,direction,entry,sl,price,tp_num,tp_price,progress,cycle,created_at&type=neq.test&order=created_at.desc&limit=20`, {
@@ -49,7 +61,6 @@ Deno.serve(async (req) => {
     tradeHistory = await r.json();
   } catch (e) { console.error('Error loading history:', (e as Error).message); }
 
-  // Fetch stats
   let stats: any = { totalEntries: 0, totalTPs: 0, totalSLs: 0, totalComplete: 0 };
   try {
     const r = await fetch(`${SUPA_URL}/rest/v1/alerts?select=type`, {
