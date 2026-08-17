@@ -459,12 +459,14 @@ body::after{content:"";position:fixed;top:0;left:0;right:0;bottom:0;background-i
 
 <script>
 // CONFIG
-const PROXY_URL = 'https://base44.app/api/apps/6a56a2b28ff3c6a17b698049/functions/yahooProxy';
+const PROXY_URL = '';
+const SPOT_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price';
+const CANDLES_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-xau-candles';
 const LIVE_PRICE_URL = 'https://base44.app/api/apps/6a59ebfbbec4437165873f86/functions/getLivePrice';
 const FINNHUB_KEY = 'd9b9t5pr01qmk4gktahgd9b9t5pr01qmk4gktai0';
 
 const ASSETS = [
-  {sym:'GC=F',id:'p_GCF',label:'GOLD',dp:2},
+  {sym:'XAU/USD',id:'p_GCF',label:'GOLD SPOT',dp:2},
   {sym:'SI=F',id:'p_SIF',label:'SILVER',dp:2},
   {sym:'CL=F',id:'p_CLF',label:'WTI',dp:2},
   {sym:'DX-Y.NYB',id:'p_DXY',label:'DXY',dp:3},
@@ -482,16 +484,17 @@ let lastSignalHistory = []; // track signal history for stability
 
 // PROXY CALLS
 async function proxyQuotes(symbols) {
-  const url = `${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`;
-  if (!navigator.onLine) { console.log('[Gold Sniper] Price fetch skipped (offline)'); return; }
-  let r;
-  try { r = await fetch(url); } catch(e) { console.log('[Gold Sniper] Price fetch failed (offline)'); return; }
-  return r.json();
+  if (!PROXY_URL || !navigator.onLine) return {data:{}};
+  try { const r = await fetch(`${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`); if (!r.ok) return {data:{}}; return r.json(); }
+  catch(e) { return {data:{}}; }
 }
 
 async function proxyChart(symbol, interval, range) {
-  const url = `${PROXY_URL}?action=chart&symbol=${encodeURIComponent(symbol)}&interval=${interval}&range=${range}`;
-  const r = await fetch(url);
+  const map = {'1m':'1min','5m':'5min','15m':'15min','30m':'30min','1h':'1h','4h':'4h'};
+  const count = range==='1d' ? 400 : range==='5d' ? 600 : range==='1mo' ? 800 : 1200;
+  const u = `${CANDLES_URL}?interval=${encodeURIComponent(map[interval]||interval)}&outputsize=${count}`;
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`Candle API HTTP ${r.status}`);
   return r.json();
 }
 
@@ -507,31 +510,28 @@ async function fetchNews() {
 // PRICES
 async function updatePrices() {
   try {
-    const syms = ASSETS.map(a => a.sym);
-    const res = await proxyQuotes(syms);
-    const data = res.data || {};
-
-    ASSETS.forEach(a => {
-      const info = data[a.sym];
-      if (!info || info.error) return;
-      const el = document.getElementById(a.id);
-      if (el) el.textContent = info.price.toFixed(a.dp);
-      updateTicker(a.sym, a.label, info.price, info.change, info.changePct, a.dp);
-
-      if (a.sym === 'GC=F') {
-        document.getElementById('goldChg').textContent = (info.change>=0?'+':'')+info.change.toFixed(2);
-        document.getElementById('goldChg').className = 'a-c '+(info.change>=0?'up':'dn');
-        document.getElementById('goldChgPct').textContent = (info.changePct>=0?'+':'')+info.changePct.toFixed(2)+'%';
-        document.getElementById('goldChgPct').className = 'a-c '+(info.changePct>=0?'up':'dn');
-        document.getElementById('goldHigh').textContent = info.high.toFixed(2);
-        document.getElementById('goldLow').textContent = info.low.toFixed(2);
-        sigData.price = info.changePct > 0.3 ? 1 : info.changePct < -0.3 ? -1 : 0;
-      }
-    });
+    const spotRes = await fetch(SPOT_URL, {cache:'no-store'});
+    if (!spotRes.ok) throw new Error(`Spot HTTP ${spotRes.status}`);
+    const spot = await spotRes.json();
+    if (!spot.success || typeof spot.price !== 'number') throw new Error(spot.error || 'Spot unavailable');
+    const gold = Number(spot.price);
+    const goldEl = document.getElementById('p_GCF');
+    if (goldEl) goldEl.textContent = gold.toFixed(2);
+    updateTicker('XAUUSD','GOLD SPOT',gold,Number(spot.change||0),Number(spot.changePct||0),2);
+    const chg=Number(spot.change||0), pct=Number(spot.changePct||0);
+    document.getElementById('goldChg').textContent=(chg>=0?'+':'')+chg.toFixed(2);
+    document.getElementById('goldChg').className='a-c '+(chg>=0?'up':'dn');
+    document.getElementById('goldChgPct').textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';
+    document.getElementById('goldChgPct').className='a-c '+(pct>=0?'up':'dn');
+    if (spot.dayHigh!=null) document.getElementById('goldHigh').textContent=Number(spot.dayHigh).toFixed(2);
+    if (spot.dayLow!=null) document.getElementById('goldLow').textContent=Number(spot.dayLow).toFixed(2);
+    sigData.price=pct>0.3?1:pct<-0.3?-1:0;
     updateSignal();
-  } catch(e) { console.error('Price error:', e); }
+  } catch(e) {
+    console.error('[Gold Sniper] Spot price error:',e);
+    const st=document.getElementById('sigStatus'); if(st) st.textContent='SPOT FEED RETRYING';
+  }
 }
-
 function updateTicker(sym, label, price, change, pct, dp) {
   let el = document.getElementById('tk_'+sym.replace(/[=]/g,'_').replace(/-/g,'_'));
   if (!el) {
@@ -574,7 +574,7 @@ async function loadChart(interval, range) {
   document.getElementById('pats').innerHTML = '<span class="ld">Loading...</span>';
 
   try {
-    const res = await proxyChart('GC=F', interval, range);
+    const res = await proxyChart('XAU/USD', interval, range);
     if (res.error) { document.getElementById('pats').innerHTML = '<span class="er">'+res.error+'</span>'; return; }
 
     let candles = res.candles || [];
@@ -1249,7 +1249,7 @@ async function updateATRPanel() {
     for (const tf of ATR_TFS) {
       try {
         initATRState(tf.label);
-        const res = await proxyChart('GC=F', tf.interval, tf.range);
+        const res = await proxyChart('XAU/USD', tf.interval, tf.range);
         if (res.error || !res.candles || res.candles.length < 25) {
           cardsHtml += `<div class="atr-card neutral"><div class="atr-tf-label">${tf.label}</div><div class="ld">No data</div></div>`;
           continue;
@@ -1447,8 +1447,8 @@ async function updateMultiTFTrend() {
   try {
     // Fetch 1h and 4h data to determine higher timeframe trends
     const [res1h, res4h] = await Promise.all([
-      proxyChart('GC=F', '1h', '1mo'),
-      proxyChart('GC=F', '1h', '3mo')
+      proxyChart('XAU/USD', '1h', '1mo'),
+      proxyChart('XAU/USD', '1h', '3mo')
     ]);
     
     let trendScore = 0;
@@ -1501,7 +1501,7 @@ let tickFeedActive = false;
 async function pollBackendTicks() {
   if (!navigator.onLine) return;
   try {
-    const r = await fetch(LIVE_PRICE_URL);
+    const r = await fetch(SPOT_URL, {cache:'no-store'});
     if (!r.ok) return;
     const data = await r.json();
     if (!data.success) return;
@@ -1594,23 +1594,9 @@ async function pollBackendTicks() {
 async function init() {
   loadATRState(); // Load saved ATR levels from localStorage before anything else
 
-  // === BACKEND STATE SYNC — Gold Sniper ===
-  // Seed latest backend trading state into localStorage on page load
-  const BACKEND_SEED_STATE = {"1M": {"entry": 4022.6, "sl": 4025.59, "atr": 1.99, "dir": "short", "tp1": 4019.61, "tp2": 4016.62, "tp3": 4013.63, "tp4": 4007.65, "tp5": 3998.69, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 4, "lastSignal": "sell"}, "5M": {"entry": 4018.1, "sl": 4013.18, "atr": 3.28, "dir": "long", "tp1": 4023.02, "tp2": 4027.94, "tp3": 4032.85, "tp4": 4042.69, "tp5": 4057.44, "tp1Hit": false, "tp2Hit": false, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 4, "lastSignal": "buy"}, "15M": {"entry": 4005.1, "sl": 3986.61, "atr": 12.33, "dir": "long", "tp1": 4023.59, "tp2": 4042.09, "tp3": 4060.58, "tp4": 4097.56, "tp5": 4153.04, "tp1Hit": true, "tp2Hit": false, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 3, "lastSignal": "buy"}, "1H": {"entry": 4036.9, "sl": 4064.9, "atr": 18.66, "dir": "short", "tp1": 4008.9, "tp2": 3980.91, "tp3": 3952.91, "tp4": 3896.92, "tp5": 3812.93, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 1, "lastSignal": "sell"}, "4H": {"entry": 4109.6, "sl": 4167.64, "atr": 38.69, "dir": "short", "tp1": 4051.56, "tp2": 3993.52, "tp3": 3935.48, "tp4": 3819.4, "tp5": 3645.29, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 1, "lastSignal": "sell"}};
-  (function syncBackendState() {
-    try {
-      const existing = localStorage.getItem('xau_atr_state');
-      let current = existing ? JSON.parse(existing) : {};
-      // Merge: only update fields that are missing or zero (don't override live hits)
-      for (const tf of Object.keys(BACKEND_SEED_STATE)) {
-        if (!current[tf] || current[tf].entry === 0 || current[tf].cycle !== BACKEND_SEED_STATE[tf].cycle) {
-          current[tf] = BACKEND_SEED_STATE[tf];
-          console.log(`[Gold Sniper] Seeded ${tf} from backend (cycle ${BACKEND_SEED_STATE[tf].cycle})`);
-        }
-      }
-      localStorage.setItem('xau_atr_state', JSON.stringify(current));
-    } catch(e) { console.error('[Gold Sniper] State sync error', e); }
-  })();
+  // Backend is the source of truth; no hard-coded browser price seed.
+  try { localStorage.removeItem('xau_atr_state'); } catch(e) {}
+
 
 
   initChart();
@@ -1623,8 +1609,8 @@ async function init() {
   document.querySelector('.tf[data-tf="1m"]').classList.add('active');
 
   pollBackendTicks(); // Initial fetch
-  setInterval(updatePrices, 1000);
-  setInterval(pollBackendTicks, 5000); // Backend tick feed every 5s
+  setInterval(updatePrices, 10000);
+  setInterval(pollBackendTicks, 2000); // Backend tick feed every 5s
   setInterval(loadNews, 120000);
   setInterval(() => loadChart(currentTF, currentRange), 30000);
   setInterval(updateATRPanel, 10000);
