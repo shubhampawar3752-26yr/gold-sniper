@@ -460,7 +460,7 @@ body::after{content:"";position:fixed;top:0;left:0;right:0;bottom:0;background-i
 <script>
 // CONFIG
 const PROXY_URL = 'https://base44.app/api/apps/6a56a2b28ff3c6a17b698049/functions/yahooProxy';
-const LIVE_PRICE_URL = 'https://base44.app/api/apps/6a59ebfbbec4437165873f86/functions/getLivePrice';
+const LIVE_PRICE_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price';
 const FINNHUB_KEY = 'd9b9t5pr01qmk4gktahgd9b9t5pr01qmk4gktai0';
 
 const ASSETS = [
@@ -1275,7 +1275,7 @@ async function updateATRPanel() {
             soundEntry();
             // Send WhatsApp alert via backend function
             const s2 = atrState[tf.label];
-            fetch('https://lyra-65873f86.base44.app/functions/sendEntryAlert', {
+            fetch('https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/send-entry-alert', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1314,7 +1314,7 @@ async function updateATRPanel() {
         }
 
         // === CHECK HITS on existing levels ===
-        const WA_URL = 'https://lyra-65873f86.base44.app/functions/sendEntryAlert';
+        const WA_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/send-entry-alert';
         const waAlert = (data) => fetch(WA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).catch(() => {});
 
         if (!s.allDone && !s.slHit) {
