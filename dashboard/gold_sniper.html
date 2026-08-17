@@ -485,17 +485,14 @@ let lastSignalHistory = []; // track signal history for stability
 // PROXY CALLS
 async function proxyQuotes(symbols) {
   if (!PROXY_URL || !navigator.onLine) return {data:{}};
-  try { const r = await fetch(`${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`); if (!r.ok) return {data:{}}; return r.json(); }
-  catch(e) { return {data:{}}; }
+  try { const r=await fetch(`${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`); if(!r.ok)return {data:{}}; return r.json(); } catch(e){return {data:{}};}
 }
 
 async function proxyChart(symbol, interval, range) {
-  const map = {'1m':'1min','5m':'5min','15m':'15min','30m':'30min','1h':'1h','4h':'4h'};
-  const count = range==='1d' ? 400 : range==='5d' ? 600 : range==='1mo' ? 800 : 1200;
-  const u = `${CANDLES_URL}?interval=${encodeURIComponent(map[interval]||interval)}&outputsize=${count}`;
-  const r = await fetch(u);
-  if (!r.ok) throw new Error(`Candle API HTTP ${r.status}`);
-  return r.json();
+  const map={'1m':'1min','5m':'5min','15m':'15min','30m':'30min','1h':'1h','4h':'4h'};
+  const count=range==='1d'?400:range==='5d'?600:range==='1mo'?800:1200;
+  const u=`${CANDLES_URL}?interval=${encodeURIComponent(map[interval]||interval)}&outputsize=${count}`;
+  const r=await fetch(u); if(!r.ok)throw new Error(`Candle API HTTP ${r.status}`); return r.json();
 }
 
 async function fetchNews() {
@@ -510,27 +507,22 @@ async function fetchNews() {
 // PRICES
 async function updatePrices() {
   try {
-    const spotRes = await fetch(SPOT_URL, {cache:'no-store'});
-    if (!spotRes.ok) throw new Error(`Spot HTTP ${spotRes.status}`);
-    const spot = await spotRes.json();
-    if (!spot.success || typeof spot.price !== 'number') throw new Error(spot.error || 'Spot unavailable');
-    const gold = Number(spot.price);
-    const goldEl = document.getElementById('p_GCF');
-    if (goldEl) goldEl.textContent = gold.toFixed(2);
+    const spotRes=await fetch(SPOT_URL,{cache:'no-store'});
+    if(!spotRes.ok)throw new Error(`Spot HTTP ${spotRes.status}`);
+    const spot=await spotRes.json();
+    if(!spot.success||typeof spot.price!=='number')throw new Error(spot.error||'Spot unavailable');
+    const gold=Number(spot.price), el=document.getElementById('p_GCF');
+    if(el)el.textContent=gold.toFixed(2);
     updateTicker('XAUUSD','GOLD SPOT',gold,Number(spot.change||0),Number(spot.changePct||0),2);
-    const chg=Number(spot.change||0), pct=Number(spot.changePct||0);
+    const chg=Number(spot.change||0),pct=Number(spot.changePct||0);
     document.getElementById('goldChg').textContent=(chg>=0?'+':'')+chg.toFixed(2);
     document.getElementById('goldChg').className='a-c '+(chg>=0?'up':'dn');
     document.getElementById('goldChgPct').textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';
     document.getElementById('goldChgPct').className='a-c '+(pct>=0?'up':'dn');
-    if (spot.dayHigh!=null) document.getElementById('goldHigh').textContent=Number(spot.dayHigh).toFixed(2);
-    if (spot.dayLow!=null) document.getElementById('goldLow').textContent=Number(spot.dayLow).toFixed(2);
-    sigData.price=pct>0.3?1:pct<-0.3?-1:0;
-    updateSignal();
-  } catch(e) {
-    console.error('[Gold Sniper] Spot price error:',e);
-    const st=document.getElementById('sigStatus'); if(st) st.textContent='SPOT FEED RETRYING';
-  }
+    if(spot.dayHigh!=null)document.getElementById('goldHigh').textContent=Number(spot.dayHigh).toFixed(2);
+    if(spot.dayLow!=null)document.getElementById('goldLow').textContent=Number(spot.dayLow).toFixed(2);
+    sigData.price=pct>0.3?1:pct<-0.3?-1:0; updateSignal();
+  }catch(e){console.error('[Gold Sniper] Spot price error:',e);const st=document.getElementById('sigStatus');if(st)st.textContent='SPOT FEED RETRYING';}
 }
 function updateTicker(sym, label, price, change, pct, dp) {
   let el = document.getElementById('tk_'+sym.replace(/[=]/g,'_').replace(/-/g,'_'));
