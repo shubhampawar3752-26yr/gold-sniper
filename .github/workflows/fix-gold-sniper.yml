@@ -11,6 +11,7 @@ permissions:
 env:
   SUPABASE_SPOT_URL: https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price
   SUPABASE_CANDLES_URL: https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-xau-candles
+  SUPABASE_ALERT_URL: https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/send-entry-alert
 
 jobs:
   fix:
@@ -23,34 +24,27 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-
-          files = [Path('dashboard/gold_sniper.html'), Path('gold_sniper.html')]
+          files=[Path('dashboard/gold_sniper.html'),Path('gold_sniper.html')]
           for p in files:
-              if not p.exists():
-                  continue
-              s = p.read_text(encoding='utf-8')
-              s = s.replace("{sym:'GC=F',id:'p_GCF',label:'GOLD',dp:2}", "{sym:'XAU/USD',id:'p_GCF',label:'GOLD SPOT',dp:2}")
-              s = s.replace("const PROXY_URL = 'https://base44.app/api/apps/6a56a2b28ff3c6a17b698049/functions/yahooProxy';", "const PROXY_URL = '';\nconst SPOT_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price';\nconst CANDLES_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-xau-candles';")
-              s = re.sub(r"async function proxyQuotes\(symbols\) \{.*?\n\}", """async function proxyQuotes(symbols) {\n  if (!PROXY_URL || !navigator.onLine) return {data:{}};\n  try { const r = await fetch(`${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`); if (!r.ok) return {data:{}}; return r.json(); }\n  catch(e) { return {data:{}}; }\n}""", s, count=1, flags=re.S)
-              s = re.sub(r"async function proxyChart\(symbol, interval, range\) \{.*?\n\}", """async function proxyChart(symbol, interval, range) {\n  const map = {'1m':'1min','5m':'5min','15m':'15min','30m':'30min','1h':'1h','4h':'4h'};\n  const count = range==='1d' ? 400 : range==='5d' ? 600 : range==='1mo' ? 800 : 1200;\n  const u = `${CANDLES_URL}?interval=${encodeURIComponent(map[interval]||interval)}&outputsize=${count}`;\n  const r = await fetch(u);\n  if (!r.ok) throw new Error(`Candle API HTTP ${r.status}`);\n  return r.json();\n}""", s, count=1, flags=re.S)
-              s = s.replace("proxyChart('GC=F'", "proxyChart('XAU/USD'")
-
-              start = s.find('async function updatePrices() {')
-              end = s.find('\nfunction updateTicker', start)
-              if start >= 0 and end > start:
-                  fn = """async function updatePrices() {\n  try {\n    const spotRes = await fetch(SPOT_URL, {cache:'no-store'});\n    if (!spotRes.ok) throw new Error(`Spot HTTP ${spotRes.status}`);\n    const spot = await spotRes.json();\n    if (!spot.success || typeof spot.price !== 'number') throw new Error(spot.error || 'Spot unavailable');\n    const gold = Number(spot.price);\n    const goldEl = document.getElementById('p_GCF');\n    if (goldEl) goldEl.textContent = gold.toFixed(2);\n    updateTicker('XAUUSD','GOLD SPOT',gold,Number(spot.change||0),Number(spot.changePct||0),2);\n    const chg=Number(spot.change||0), pct=Number(spot.changePct||0);\n    document.getElementById('goldChg').textContent=(chg>=0?'+':'')+chg.toFixed(2);\n    document.getElementById('goldChg').className='a-c '+(chg>=0?'up':'dn');\n    document.getElementById('goldChgPct').textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';\n    document.getElementById('goldChgPct').className='a-c '+(pct>=0?'up':'dn');\n    if (spot.dayHigh!=null) document.getElementById('goldHigh').textContent=Number(spot.dayHigh).toFixed(2);\n    if (spot.dayLow!=null) document.getElementById('goldLow').textContent=Number(spot.dayLow).toFixed(2);\n    sigData.price=pct>0.3?1:pct<-0.3?-1:0;\n    updateSignal();\n  } catch(e) {\n    console.error('[Gold Sniper] Spot price error:',e);\n    const st=document.getElementById('sigStatus'); if(st) st.textContent='SPOT FEED RETRYING';\n  }\n}"""
-                  s = s[:start] + fn + s[end:]
-
-              a = s.find('  // === BACKEND STATE SYNC — Gold Sniper ===')
-              b = s.find('\n\n\n  initChart();', a)
-              if a >= 0 and b > a:
-                  s = s[:a] + "  // Backend is the source of truth; no hard-coded browser price seed.\n  try { localStorage.removeItem('xau_atr_state'); } catch(e) {}\n" + s[b:]
-
-              s = s.replace("setInterval(updatePrices, 1000);", "setInterval(updatePrices, 10000);")
-              s = s.replace("setInterval(pollBackendTicks, 5000);", "setInterval(pollBackendTicks, 2000);")
-              s = s.replace("const r = await fetch(LIVE_PRICE_URL);", "const r = await fetch(SPOT_URL, {cache:'no-store'});")
-              p.write_text(s, encoding='utf-8')
-              print(f'patched {p}')
+              if not p.exists(): continue
+              s=p.read_text(encoding='utf-8')
+              s=s.replace("{sym:'GC=F',id:'p_GCF',label:'GOLD',dp:2}","{sym:'XAU/USD',id:'p_GCF',label:'GOLD SPOT',dp:2}")
+              s=s.replace("const PROXY_URL = 'https://base44.app/api/apps/6a56a2b28ff3c6a17b698049/functions/yahooProxy';","const PROXY_URL = '';\nconst SPOT_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price';\nconst CANDLES_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-xau-candles';")
+              s=s.replace("const LIVE_PRICE_URL = 'https://base44.app/api/apps/6a59ebfbbec4437165873f86/functions/getLivePrice';","const LIVE_PRICE_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price';")
+              s=s.replace("https://lyra-65873f86.base44.app/functions/sendEntryAlert","https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/send-entry-alert")
+              s=re.sub(r"async function proxyQuotes\(symbols\) \{.*?\n\}","""async function proxyQuotes(symbols) {\n  if (!PROXY_URL || !navigator.onLine) return {data:{}};\n  try { const r=await fetch(`${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`); if(!r.ok)return {data:{}}; return r.json(); } catch(e){return {data:{}};}\n}""",s,count=1,flags=re.S)
+              s=re.sub(r"async function proxyChart\(symbol, interval, range\) \{.*?\n\}","""async function proxyChart(symbol, interval, range) {\n  const map={'1m':'1min','5m':'5min','15m':'15min','30m':'30min','1h':'1h','4h':'4h'};\n  const count=range==='1d'?400:range==='5d'?600:range==='1mo'?800:1200;\n  const u=`${CANDLES_URL}?interval=${encodeURIComponent(map[interval]||interval)}&outputsize=${count}`;\n  const r=await fetch(u); if(!r.ok)throw new Error(`Candle API HTTP ${r.status}`); return r.json();\n}""",s,count=1,flags=re.S)
+              s=s.replace("proxyChart('GC=F'","proxyChart('XAU/USD'")
+              start=s.find('async function updatePrices() {'); end=s.find('\nfunction updateTicker',start)
+              if start>=0 and end>start:
+                  fn="""async function updatePrices() {\n  try {\n    const spotRes=await fetch(SPOT_URL,{cache:'no-store'});\n    if(!spotRes.ok)throw new Error(`Spot HTTP ${spotRes.status}`);\n    const spot=await spotRes.json();\n    if(!spot.success||typeof spot.price!=='number')throw new Error(spot.error||'Spot unavailable');\n    const gold=Number(spot.price), el=document.getElementById('p_GCF');\n    if(el)el.textContent=gold.toFixed(2);\n    updateTicker('XAUUSD','GOLD SPOT',gold,Number(spot.change||0),Number(spot.changePct||0),2);\n    const chg=Number(spot.change||0),pct=Number(spot.changePct||0);\n    document.getElementById('goldChg').textContent=(chg>=0?'+':'')+chg.toFixed(2);\n    document.getElementById('goldChg').className='a-c '+(chg>=0?'up':'dn');\n    document.getElementById('goldChgPct').textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';\n    document.getElementById('goldChgPct').className='a-c '+(pct>=0?'up':'dn');\n    if(spot.dayHigh!=null)document.getElementById('goldHigh').textContent=Number(spot.dayHigh).toFixed(2);\n    if(spot.dayLow!=null)document.getElementById('goldLow').textContent=Number(spot.dayLow).toFixed(2);\n    sigData.price=pct>0.3?1:pct<-0.3?-1:0; updateSignal();\n  }catch(e){console.error('[Gold Sniper] Spot price error:',e);const st=document.getElementById('sigStatus');if(st)st.textContent='SPOT FEED RETRYING';}\n}"""
+                  s=s[:start]+fn+s[end:]
+              a=s.find('  // === BACKEND STATE SYNC — Gold Sniper ==='); b=s.find('\n\n\n  initChart();',a)
+              if a>=0 and b>a:s=s[:a]+"  // Backend is the source of truth; no hard-coded browser price seed.\n  try { localStorage.removeItem('xau_atr_state'); } catch(e) {}\n"+s[b:]
+              s=s.replace("setInterval(updatePrices, 1000);","setInterval(updatePrices, 10000);")
+              s=s.replace("setInterval(pollBackendTicks, 5000);","setInterval(pollBackendTicks, 2000);")
+              s=s.replace("const r = await fetch(LIVE_PRICE_URL);","const r = await fetch(SPOT_URL, {cache:'no-store'});")
+              p.write_text(s,encoding='utf-8')
           PY
       - name: Commit and push
         shell: bash
@@ -58,6 +52,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add dashboard/gold_sniper.html gold_sniper.html .github/workflows/fix-gold-sniper.yml
-          if git diff --cached --quiet; then echo 'No dashboard changes required'; exit 0; fi
-          git commit -m 'Fix XAU/USD spot feed and signal engine'
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Fix XAU/USD spot feed, alerts and signal engine'
           git push
