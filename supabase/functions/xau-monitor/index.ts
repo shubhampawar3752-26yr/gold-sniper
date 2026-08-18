@@ -150,8 +150,25 @@ Deno.serve(async (req) => {
 
     const done = s.slHit || s.allDone || s.entry === 0;
 
+    // ── Signal flip: if crossover in opposite direction happens while trade is active, close and reverse ──
+    if (!done && s.prevEma9 != null && s.prevEma21 != null) {
+      const flipUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21 && s.dir === 'short';
+      const flipDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21 && s.dir === 'long';
+      if (flipUp || flipDn) {
+        alerts.push({
+          type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, price: tfPrice,
+          sent: false, reason: 'signal_flip',
+        });
+        s.slHit = true;
+        console.log(`🔴 ${l} signal FLIP → closing ${s.dir} trade (cycle ${s.cycle}), starting new cycle`);
+      }
+    }
+
+    // Recalculate done after potential signal flip
+    const doneNow = s.slHit || s.allDone || s.entry === 0;
+
     // ── First run (prevEma is null): set up initial trade based on current EMA position ──
-    if (done && s.prevEma9 == null && s.prevEma21 == null) {
+    if (doneNow && s.prevEma9 == null && s.prevEma21 == null) {
       const signal = ema9 > ema21 ? 'buy' : 'sell';
       s.dir = signal === 'buy' ? 'long' : 'short';
       s.cycle = 1;
@@ -171,7 +188,7 @@ Deno.serve(async (req) => {
       console.log(`🟡 ${l} initial ${signal.toUpperCase()} setup | entry=${s.entry} SL=${s.sl} ATR=${atr}`);
     }
     // ── Subsequent runs: detect crossover by comparing current vs previous EMA ──
-    else if (done && s.prevEma9 != null && s.prevEma21 != null) {
+    else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
       const prevEma9 = s.prevEma9, prevEma21 = s.prevEma21;
       const crossUp = prevEma9 <= prevEma21 && ema9 > ema21;
       const crossDn = prevEma9 >= prevEma21 && ema9 < ema21;
