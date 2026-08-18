@@ -30,6 +30,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 
 /* Signal Engine */
 .signal-engine { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+.signal-engine { transition: border-color 0.3s, box-shadow 0.3s; }
+.signal-engine:hover { border-color: rgba(255,255,255,0.15); box-shadow: 0 0 30px rgba(0,0,0,0.3); }
 .signal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
 .signal-header h2 { font-size: 18px; font-weight: 700; color: #ccc; display: flex; align-items: center; gap: 8px; }
 .signal-header h2 svg { width: 18px; height: 18px; }
@@ -45,6 +47,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 .tf-card.complete { border-color: rgba(255,215,0,0.3); background: rgba(255,215,0,0.05); }
 .tf-card.stopped { opacity: 0.5; }
 .tf-card.waiting { opacity: 0.6; }
+.tf-card:hover { transform: translateY(-3px) scale(1.03); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 20px rgba(0,0,0,0.4); cursor: default; }
 .tf-label { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 6px; }
 .tf-signal { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-bottom: 8px; }
 .tf-signal.long { background: rgba(0,255,100,0.15); color: var(--green); }
@@ -59,8 +62,9 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 .tf-entry { font-size: 11px; color: #999; margin-top: 4px; }
 
 /* Price Card */
-.price-card { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 24px; text-align: center; position: relative; overflow: hidden; }
+.price-card { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 24px; text-align: center; position: relative; overflow: hidden; transition: transform 0.3s, border-color 0.3s, box-shadow 0.3s; }
 .price-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--gold), transparent); }
+.price-card:hover { border-color: var(--gold); box-shadow: 0 0 30px rgba(255,215,0,0.08); transform: translateY(-2px); }
 .price-label { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 8px; }
 .price-value { font-size: 48px; font-weight: 800; color: var(--gold); transition: color 0.3s; }
 .price-value.up { color: var(--green); }
@@ -77,22 +81,24 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 
 /* Stats Bar */
 .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-.stat-tile { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 12px; padding: 18px; text-align: center; }
+.stat-tile { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 12px; padding: 18px; text-align: center; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
 .stat-tile .num { font-size: 28px; font-weight: 800; color: #fff; }
 .stat-tile .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-top: 4px; }
 .stat-tile.green .num { color: var(--green); }
 .stat-tile.red .num { color: var(--red); }
 .stat-tile.gold .num { color: var(--gold); }
+.stat-tile:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 
 /* Active Trades */
 .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .section-title h2 { font-size: 18px; font-weight: 700; color: #ccc; }
 .trade-count { padding: 4px 12px; background: rgba(255,215,0,0.1); border: 1px solid rgba(255,215,0,0.3); border-radius: 12px; font-size: 13px; font-weight: 600; color: var(--gold); }
 .trade-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
-.trade-card { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 12px; padding: 20px; position: relative; overflow: hidden; }
+.trade-card { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 12px; padding: 20px; position: relative; overflow: hidden; transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s; }
 .trade-card::before { content: ''; position: absolute; top: 0; left: 0; bottom: 0; width: 3px; }
 .trade-card.long::before { background: var(--green); }
 .trade-card.short::before { background: var(--red); }
+.trade-card:hover { border-color: rgba(255,255,255,0.15); box-shadow: 0 4px 20px rgba(0,0,0,0.4); transform: translateY(-2px); }
 .trade-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .trade-tf { font-size: 16px; font-weight: 700; color: #fff; }
 .trade-dir { padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
