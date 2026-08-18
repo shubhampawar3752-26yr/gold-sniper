@@ -3,6 +3,7 @@ const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 const ALPHA_VANTAGE_KEY = Deno.env.get('ALPHA_VANTAGE_API_KEY')!;
 const GOLDAPI_KEY = Deno.env.get('GOLDAPI_KEY') || '';
+const PREV_CLOSE_OVERRIDE = 4416.68;
 
 const SIO_BASE = 'https://www.livepriceofgold.com/sio/p7012/socket.io/';
 const SIO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*' };
@@ -50,7 +51,7 @@ async function fetchLivePriceOfGoldSIO(): Promise<{ price: number; prevClose: nu
     if (xauMatch) {
       const price = parseFloat(xauMatch[1]);
       if (!isNaN(price) && price > 0) {
-        const prevClose = await prevClosePromise;
+        const prevClose = PREV_CLOSE_OVERRIDE || await prevClosePromise;
         return { price, prevClose, source: 'livepriceofgold-sio' };
       }
     }
@@ -70,7 +71,7 @@ async function fetchLivePriceOfGoldHTML(): Promise<{ price: number; prevClose: n
   const openMatch = html.match(/data-open="([\d.]+)"/);
   if (!priceMatch) throw new Error('livepriceofgold HTML: price not found');
   const price = parseFloat(priceMatch[1].trim().replace(/,/g, ''));
-  const prevClose = openMatch ? parseFloat(openMatch[1]) : 0;
+  const prevClose = PREV_CLOSE_OVERRIDE || (openMatch ? parseFloat(openMatch[1]) : 0);
   if (isNaN(price) || price <= 0) throw new Error('livepriceofgold HTML: invalid price');
   return { price, prevClose, source: 'livepriceofgold' };
 }
