@@ -62,9 +62,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 .tf-entry { font-size: 11px; color: #999; margin-top: 4px; }
 
 /* Price Card */
-.price-card { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 32px; margin-bottom: 24px; text-align: center; position: relative; overflow: hidden; transition: transform 0.3s, border-color 0.3s, box-shadow 0.3s; }
-.price-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--gold), transparent); }
-.price-card:hover { border-color: var(--gold); box-shadow: 0 0 30px rgba(255,215,0,0.08); transform: translateY(-2px); }
+.price-card { background: linear-gradient(135deg, var(--card), #12121a); border-radius: 16px; padding: 32px; margin-bottom: 24px; text-align: center; position: relative; transition: transform 0.3s, box-shadow 0.3s; }
+.price-card::before { content: ''; position: absolute; inset: -2px; border-radius: 16px; padding: 2px; background: conic-gradient(from var(--angle, 0deg), transparent 0%, var(--gold) 15%, var(--gold-orange) 30%, transparent 50%, transparent 100%); -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: rotate-border 4s linear infinite; pointer-events: none; }
+.price-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--gold), transparent); }
+.price-card:hover { box-shadow: 0 0 40px rgba(255,215,0,0.15); transform: translateY(-2px); }
+@property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes rotate-border { to { --angle: 360deg; } }
 .price-label { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 8px; }
 .price-value { font-size: 48px; font-weight: 800; color: var(--gold); transition: color 0.3s; }
 .price-value.up { color: var(--green); }
