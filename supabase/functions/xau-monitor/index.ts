@@ -3,7 +3,7 @@
 // Crossover detection via stored previous EMA values
 // Initial setup: when prevEma is null, set up trade based on current EMA position
 
-const ATR_SL_MULT = 1.5, RR = [1, 2, 3, 5, 8];
+const ATR_SL_MULT = 2, RR = [1, 2, 3, 5, 8];
 const TFS = [
   { l: '1M', tv: '1' },
   { l: '5M', tv: '5' },
