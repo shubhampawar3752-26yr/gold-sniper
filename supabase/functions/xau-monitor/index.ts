@@ -32,7 +32,8 @@ function ns() {
   return { entry: 0, sl: 0, tp1: 0, tp2: 0, tp3: 0, tp4: 0, tp5: 0, atr: 0, dir: 'long',
     tp1Hit: false, tp2Hit: false, tp3Hit: false, tp4Hit: false, tp5Hit: false,
     slHit: false, allDone: false, cycle: 0, lastSignal: null,
-    prevEma9: null, prevEma21: null };
+    prevEma9: null, prevEma21: null,
+    aiConfirmed: false, aiReason: 'no_ai_data' };
 }
 
 function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
@@ -106,6 +107,44 @@ async function supaUpdate(table: string, data: any, id: number) {
   await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(data) });
 }
 
+
+// ── Fetch latest AI Candle Scanner analysis ──
+async function fetchAIAnalysis(): Promise<Record<string, any>> {
+  try {
+    const r = await fetch(
+      `${SUPA_URL}/rest/v1/ai_candle_analysis?select=timeframe,recommendation,confidence,pattern,pattern_type,rsi,rsi_signal,trend_direction,trend_strength,suggested_entry,suggested_sl,suggested_tp1&order=created_at.desc&limit=12`,
+      { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
+    );
+    if (!r.ok) return {};
+    const rows: any[] = await r.json();
+    const map: Record<string, any> = {};
+    for (const row of rows) {
+      if (!map[row.timeframe]) map[row.timeframe] = row; // first = most recent
+    }
+    return map;
+  } catch { return {}; }
+}
+
+// ── Check if AI confirms the trade direction ──
+function aiConfirms(aiData: any, direction: string): { confirmed: boolean; reason: string } {
+  if (!aiData || !aiData.recommendation) return { confirmed: true, reason: 'no_ai_data' };
+  
+  const rec = aiData.recommendation;
+  const isLong = direction === 'long';
+  
+  // AI says buy/strong_buy and we want long → confirmed
+  if (isLong && (rec === 'buy' || rec === 'strong_buy' || rec === 'weak_buy'))
+    return { confirmed: true, reason: `ai_${rec}` };
+  // AI says sell/strong_sell and we want short → confirmed
+  if (!isLong && (rec === 'sell' || rec === 'strong_sell' || rec === 'weak_sell'))
+    return { confirmed: true, reason: `ai_${rec}` };
+  // AI says neutral → allow but flag
+  if (rec === 'neutral')
+    return { confirmed: true, reason: 'ai_neutral' };
+  // AI disagrees → block
+  return { confirmed: false, reason: `ai_disagrees_${rec}` };
+}
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 Deno.serve(async (req) => {
@@ -122,6 +161,7 @@ Deno.serve(async (req) => {
   const alerts: any[] = [], tl: any[] = [];
   let tvData: Record<string, any> = {};
   let livePrice: number | null = null;
+  let aiAnalysis: Record<string, any> = {};
 
   try {
     tvData = await fetchTVIndicators();
@@ -130,6 +170,14 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error('TV scanner failed:', (e as Error).message);
     livePrice = await fetchLivePrice();
+  }
+
+  // Fetch latest AI candle scanner analysis
+  try {
+    aiAnalysis = await fetchAIAnalysis();
+    console.log(`AI: ${Object.keys(aiAnalysis).length} timeframes analyzed`);
+  } catch (e) {
+    console.error('AI analysis fetch failed:', (e as Error).message);
   }
 
   for (const tf of TFS) {
@@ -186,14 +234,21 @@ Deno.serve(async (req) => {
       s.tp1Hit = s.tp2Hit = s.tp3Hit = s.tp4Hit = s.tp5Hit = false;
       s.slHit = s.allDone = false;
       setLevels(s, atr);
+      // AI confirmation check
+      const ai = aiAnalysis[l];
+      const aiCheck = aiConfirms(ai, s.dir);
+      s.aiConfirmed = aiCheck.confirmed;
+      s.aiReason = aiCheck.reason;
       alerts.push({
         type: 'entry', timeframe: l, direction: signal,
         entry: s.entry, sl: s.sl,
         tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5 },
         cycle: s.cycle, price: tfPrice, sent: false,
         atr: atr, rsi: tvData[`RSI|${tf.tv}`],
+        aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason,
+        aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence,
       });
-      console.log(`🟡 ${l} initial ${signal.toUpperCase()} setup | entry=${s.entry} SL=${s.sl} ATR=${atr}`);
+      console.log(`🟡 ${l} initial ${signal.toUpperCase()} setup | entry=${s.entry} SL=${s.sl} ATR=${atr} | AI: ${aiCheck.reason}`);
     }
     // ── Subsequent runs: detect crossover by comparing current vs previous EMA ──
     else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
@@ -210,14 +265,21 @@ Deno.serve(async (req) => {
         s.slHit = s.allDone = false;
         s.lastSignal = crossUp ? 'buy' : 'sell';
         setLevels(s, atr);
+        // AI confirmation check
+        const ai = aiAnalysis[l];
+        const aiCheck = aiConfirms(ai, s.dir);
+        s.aiConfirmed = aiCheck.confirmed;
+        s.aiReason = aiCheck.reason;
         alerts.push({
           type: 'entry', timeframe: l, direction: s.lastSignal,
           entry: s.entry, sl: s.sl,
           tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5 },
           cycle: s.cycle, price: tfPrice, sent: false,
           atr: atr, rsi: tvData[`RSI|${tf.tv}`],
+          aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason,
+          aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence,
         });
-        console.log(`🟢 ${l} ${s.lastSignal.toUpperCase()} crossover | entry=${s.entry} SL=${s.sl} ATR=${atr}`);
+        console.log(`🟢 ${l} ${s.lastSignal.toUpperCase()} crossover | entry=${s.entry} SL=${s.sl} ATR=${atr} | AI: ${aiCheck.reason}`);
       }
     }
     
@@ -277,6 +339,9 @@ Deno.serve(async (req) => {
         slHit: s.slHit, allDone: s.allDone,
         tpHits: [s.tp1Hit, s.tp2Hit, s.tp3Hit, s.tp4Hit, s.tp5Hit],
         tps: [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5],
+        aiConfirmed: s.aiConfirmed || false, aiReason: s.aiReason || 'no_ai_data',
+        aiPattern: aiAnalysis[l]?.pattern, aiRecommendation: aiAnalysis[l]?.recommendation,
+        aiConfidence: aiAnalysis[l]?.confidence,
       };
     }),
     ticks: tl.length,
