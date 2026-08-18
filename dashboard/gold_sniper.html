@@ -459,7 +459,7 @@ body::after{content:"";position:fixed;top:0;left:0;right:0;bottom:0;background-i
 
 <script>
 // CONFIG
-const PROXY_URL = 'https://base44.app/api/apps/6a56a2b28ff3c6a17b698049/functions/yahooProxy';
+const SUPA_PRICE_URL = 'https://schegpkwfwkgfmmpnzic.supabase.co/functions/v1/get-live-price';
 const LIVE_PRICE_URL = 'https://base44.app/api/apps/6a59ebfbbec4437165873f86/functions/getLivePrice';
 const FINNHUB_KEY = 'd9b9t5pr01qmk4gktahgd9b9t5pr01qmk4gktai0';
 
@@ -482,7 +482,7 @@ let lastSignalHistory = []; // track signal history for stability
 
 // PROXY CALLS
 async function proxyQuotes(symbols) {
-  const url = `${PROXY_URL}?action=quotes&symbols=${symbols.join(',')}`;
+  const url = SUPA_PRICE_URL;
   if (!navigator.onLine) { console.log('[Gold Sniper] Price fetch skipped (offline)'); return; }
   let r;
   try { r = await fetch(url); } catch(e) { console.log('[Gold Sniper] Price fetch failed (offline)'); return; }
@@ -490,7 +490,7 @@ async function proxyQuotes(symbols) {
 }
 
 async function proxyChart(symbol, interval, range) {
-  const url = `${PROXY_URL}?action=chart&symbol=${encodeURIComponent(symbol)}&interval=${interval}&range=${range}`;
+  const url = SUPA_PRICE_URL;
   const r = await fetch(url);
   return r.json();
 }

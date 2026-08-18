@@ -65,13 +65,34 @@ async function fetchTVIndicators(): Promise<Record<string, any>> {
   return await resp.json();
 }
 
-async function yahooLivePx(): Promise<number | null> {
+// Live price fetch — NO YAHOO FINANCE. Uses TwelveData API + livepriceofgold.com HTML as fallback.
+const TWELVEDATA_KEY = Deno.env.get('TWELVEDATA_API_KEY') || '';
+
+async function fetchLivePrice(): Promise<number | null> {
+  // Source 1: TwelveData API
   try {
-    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1m&range=1m`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-    if (!r.ok) return null;
-    const d = await r.json();
-    return d?.chart?.result?.[0]?.meta?.regularMarketPrice || null;
-  } catch { return null; }
+    const r = await fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${TWELVEDATA_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (r.ok) {
+      const d = await r.json();
+      const px = parseFloat(d?.price);
+      if (px > 0) return px;
+    }
+  } catch { /* fall through */ }
+
+  // Source 2: livepriceofgold.com HTML scrape
+  try {
+    const r = await fetch('https://livepriceofgold.com/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (r.ok) {
+      const html = await r.text();
+      const m = html.match(/bold\.\s*price[^>]*>\s*\$?([\d,]+\.\d+)/i) || html.match(/>([\d,]+\.\d{2})</);
+      if (m) {
+        const px = parseFloat(m[1].replace(/,/g, ''));
+        if (px > 0) return px;
+      }
+    }
+  } catch { /* fall through */ }
+
+  return null;
 }
 
 async function supaSelect(table: string, limit = 1) {
@@ -108,7 +129,7 @@ Deno.serve(async (req) => {
     console.log(`TV: price=${livePrice}, EMA9|5=${tvData['EMA9|5']}, EMA21|5=${tvData['EMA21|5']}`);
   } catch (e) {
     console.error('TV scanner failed:', (e as Error).message);
-    livePrice = await yahooLivePx();
+    livePrice = await fetchLivePrice();
   }
 
   for (const tf of TFS) {
@@ -186,7 +207,7 @@ Deno.serve(async (req) => {
   // Live ticks
   for (let t = 0; t < TICKS; t++) {
     if (t > 0) await sleep(TICK_MS);
-    const px = await yahooLivePx();
+    const px = await fetchLivePrice();
     if (px == null) continue;
     const tt = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
     tl.push({ time: tt, price: px, tick: t + 1 });
