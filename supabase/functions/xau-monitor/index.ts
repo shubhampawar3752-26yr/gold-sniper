@@ -110,38 +110,33 @@ async function supaUpdate(table: string, data: any, id: number) {
 
 // ── Fetch latest AI Candle Scanner analysis ──
 async function fetchAIAnalysis(): Promise<Record<string, any>> {
+  const map: Record<string, any> = {};
   try {
     const r = await fetch(
       `${SUPA_URL}/rest/v1/ai_candle_analysis?select=timeframe,recommendation,confidence,pattern,pattern_type,rsi,rsi_signal,trend_direction,trend_strength,suggested_entry,suggested_sl,suggested_tp1&order=created_at.desc&limit=12`,
       { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
     );
-    if (!r.ok) return {};
-    const rows: any[] = await r.json();
-    const map: Record<string, any> = {};
-    for (const row of rows) {
-      if (!map[row.timeframe]) map[row.timeframe] = row; // first = most recent
+    if (r.ok) {
+      const rows: any[] = await r.json();
+      for (const row of rows) {
+        if (!map[row.timeframe]) map[row.timeframe] = row;
+      }
     }
-    return map;
-  } catch { return {}; }
+  } catch {}
+  return map;
 }
 
-// ── Check if AI confirms the trade direction ──
+// ── Check if AI candle scanner confirms the trade direction ──
 function aiConfirms(aiData: any, direction: string): { confirmed: boolean; reason: string } {
   if (!aiData || !aiData.recommendation) return { confirmed: true, reason: 'no_ai_data' };
-  
   const rec = aiData.recommendation;
   const isLong = direction === 'long';
-  
-  // AI says buy/strong_buy and we want long → confirmed
   if (isLong && (rec === 'buy' || rec === 'strong_buy' || rec === 'weak_buy'))
     return { confirmed: true, reason: `ai_${rec}` };
-  // AI says sell/strong_sell and we want short → confirmed
   if (!isLong && (rec === 'sell' || rec === 'strong_sell' || rec === 'weak_sell'))
     return { confirmed: true, reason: `ai_${rec}` };
-  // AI says neutral → allow but flag
   if (rec === 'neutral')
     return { confirmed: true, reason: 'ai_neutral' };
-  // AI disagrees → block
   return { confirmed: false, reason: `ai_disagrees_${rec}` };
 }
 
