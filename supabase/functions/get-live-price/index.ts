@@ -3,7 +3,6 @@ const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 const ALPHA_VANTAGE_KEY = Deno.env.get('ALPHA_VANTAGE_API_KEY')!;
 const GOLDAPI_KEY = Deno.env.get('GOLDAPI_KEY') || '';
-const PREV_CLOSE_OVERRIDE = 4416.68;
 
 const SIO_BASE = 'https://www.livepriceofgold.com/sio/p7012/socket.io/';
 const SIO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*' };
@@ -51,7 +50,7 @@ async function fetchLivePriceOfGoldSIO(): Promise<{ price: number; prevClose: nu
     if (xauMatch) {
       const price = parseFloat(xauMatch[1]);
       if (!isNaN(price) && price > 0) {
-        const prevClose = PREV_CLOSE_OVERRIDE || await prevClosePromise;
+        const prevClose = (await prevClosePromise) || 0;
         return { price, prevClose, source: 'livepriceofgold-sio' };
       }
     }
@@ -71,7 +70,7 @@ async function fetchLivePriceOfGoldHTML(): Promise<{ price: number; prevClose: n
   const openMatch = html.match(/data-open="([\d.]+)"/);
   if (!priceMatch) throw new Error('livepriceofgold HTML: price not found');
   const price = parseFloat(priceMatch[1].trim().replace(/,/g, ''));
-  const prevClose = PREV_CLOSE_OVERRIDE || (openMatch ? parseFloat(openMatch[1]) : 0);
+  const prevClose = openMatch ? parseFloat(openMatch[1]) : 0;
   if (isNaN(price) || price <= 0) throw new Error('livepriceofgold HTML: invalid price');
   return { price, prevClose, source: 'livepriceofgold' };
 }
@@ -146,14 +145,14 @@ Deno.serve(async (req) => {
   const fetchMs = Date.now() - t0;
   if (!live) return new Response(JSON.stringify({ success: false, error: 'All price sources failed', timestamp: now }), { status: 503, headers });
 
-  const change = live.prevClose > 0 ? live.price - live.prevClose : 0;
-  const changePct = live.prevClose > 0 ? (change / live.prevClose) * 100 : 0;
+  const effectivePrevClose = (states?.__prevClose?.value || 0) || live.prevClose || 0; const change = effectivePrevClose > 0 ? live.price - effectivePrevClose : 0;
+  const changePct = effectivePrevClose > 0 ? (change / effectivePrevClose) * 100 : 0;
 
   let states: any = null, lastRun: string | null = null, lastTick: any = null;
   try {
     const r = await fetch(`${SUPA_URL}/rest/v1/trading_states?select=*&limit=1`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
     const data = await r.json();
-    if (data && data.length > 0) { states = data[0].states || {}; lastRun = data[0].last_run || null; lastTick = states?.__ticks || null; }
+    if (data && data.length > 0) { states = data[0].states || {}; lastRun = data[0].last_run || null; lastTick = states?.__ticks || null; } const dbPrevClose = states?.__prevClose?.value || 0;
   } catch (e) { console.error('State error:', (e as Error).message); }
 
   let tradeHistory: any[] = [];
@@ -196,7 +195,7 @@ Deno.serve(async (req) => {
   if (longCount > shortCount) overallSignal = 'bullish'; else if (shortCount > longCount) overallSignal = 'bearish';
 
   return new Response(JSON.stringify({
-    success: true, timestamp: now, price: live.price, prevClose: live.prevClose, change, changePct,
+    success: true, timestamp: now, price: live.price, prevClose: effectivePrevClose || live.prevClose, change, changePct,
     marketState: 'open', marketTime: Math.floor(Date.now() / 1000), priceSource: live.source,
     fetchMs, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length,
     allTimeframes, overallSignal, longCount, shortCount, tradeHistory, stats,
