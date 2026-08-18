@@ -150,10 +150,18 @@ Deno.serve(async (req) => {
 
     const done = s.slHit || s.allDone || s.entry === 0;
 
-    // ── Signal flip: if crossover in opposite direction happens while trade is active, close and reverse ──
+    // ── Signal flip: close trade when EMA position is opposite to trade direction ──
     if (!done && s.prevEma9 != null && s.prevEma21 != null) {
-      const flipUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21 && s.dir === 'short';
-      const flipDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21 && s.dir === 'long';
+      // Detect exact crossover bar (preferred)
+      const crossUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21;
+      const crossDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21;
+      // Also detect already-flipped state (crossover happened in a previous run we missed)
+      const alreadyFlippedUp = s.prevEma9 > s.prevEma21 && ema9 > ema21 && s.dir === 'short';
+      const alreadyFlippedDn = s.prevEma9 < s.prevEma21 && ema9 < ema21 && s.dir === 'long';
+      
+      const flipUp = (crossUp || alreadyFlippedUp) && s.dir === 'short';
+      const flipDn = (crossDn || alreadyFlippedDn) && s.dir === 'long';
+      
       if (flipUp || flipDn) {
         alerts.push({
           type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, price: tfPrice,
