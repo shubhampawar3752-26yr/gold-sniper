@@ -13,6 +13,20 @@ const META_API_VERSION = Deno.env.get('META_WHATSAPP_API_VERSION') || 'v18.0';
 // Fallback: comma-separated recipient numbers in env (format: 91XXXXXXXXXX,91YYYYYYYYYY)
 const FALLBACK_RECIPIENTS = Deno.env.get('WHATSAPP_RECIPIENTS') || '';
 
+// CallMeBot — free WhatsApp API for numbers not in Meta test list
+const CALLMEBOT_API_KEY = Deno.env.get('CALLMEBOT_API_KEY') || '';
+const CALLMEBOT_PHONES = (Deno.env.get('CALLMEBOT_PHONES') || '').split(',').map(s => s.trim()).filter(Boolean);
+
+async function sendViaCallMeBot(phoneNumber: string, message: string) {
+  if (!CALLMEBOT_API_KEY) throw new Error('CallMeBot: no API key configured');
+  const url = `https://api.callmebot.com/whatsapp.php?phone=${phoneNumber}&text=${encodeURIComponent(message)}&apikey=${CALLMEBOT_API_KEY}`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) throw new Error(`CallMeBot HTTP ${res.status}`);
+  const text = await res.text();
+  if (text.includes('Error') || text.includes('error')) throw new Error(`CallMeBot: ${text.substring(0, 150)}`);
+  return { ok: true, phone: phoneNumber };
+}
+
 const CORS = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
 
 interface AlertData {
@@ -175,11 +189,29 @@ Deno.serve(async (req) => {
     let allOk = true;
 
     for (const phone of recipients) {
+      // Use CallMeBot for numbers in the CallMeBot list, Meta for the rest
+      const useCallMeBot = CALLMEBOT_PHONES.includes(phone);
       try {
-        const result = await sendViaMeta(phone, message);
-        results.push({ phone, ok: true, message_id: result?.messages?.[0]?.id });
+        if (useCallMeBot) {
+          const result = await sendViaCallMeBot(phone, message);
+          results.push({ phone, ok: true, via: 'callmebot' });
+        } else {
+          const result = await sendViaMeta(phone, message);
+          results.push({ phone, ok: true, message_id: result?.messages?.[0]?.id, via: 'meta' });
+        }
       } catch (e) {
-        results.push({ phone, ok: false, error: (e as Error).message });
+        // If Meta fails, try CallMeBot as fallback
+        if (!useCallMeBot && CALLMEBOT_API_KEY) {
+          try {
+            await sendViaCallMeBot(phone, message);
+            results.push({ phone, ok: true, via: 'callmebot-fallback' });
+            continue;
+          } catch (e2) {
+            results.push({ phone, ok: false, error: `Meta: ${(e as Error).message} | CallMeBot: ${(e2 as Error).message}` });
+          }
+        } else {
+          results.push({ phone, ok: false, error: (e as Error).message });
+        }
         allOk = false;
       }
     }
