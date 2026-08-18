@@ -7,8 +7,24 @@ const GOLDAPI_KEY = Deno.env.get('GOLDAPI_KEY') || '';
 const SIO_BASE = 'https://www.livepriceofgold.com/sio/p7012/socket.io/';
 const SIO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*' };
 
+// ── Fetch prevClose from HTML (data-open attribute = today's open = yesterday's close) ──
+async function fetchPrevClose(): Promise<number> {
+  try {
+    const r = await fetch('https://www.livepriceofgold.com/', {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'text/html' },
+    });
+    if (!r.ok) return 0;
+    const html = await r.text();
+    const openMatch = html.match(/data-open="([\d.]+)"/);
+    return openMatch ? parseFloat(openMatch[1]) : 0;
+  } catch { return 0; }
+}
+
 // ── PRIMARY: LivePriceOfGold.com Socket.IO (real-time, ~500ms updates) ──
 async function fetchLivePriceOfGoldSIO(): Promise<{ price: number; prevClose: number; source: string }> {
+  // Start prevClose fetch in parallel (runs while we handshake+poll SIO)
+  const prevClosePromise = fetchPrevClose();
+
   // Step 1: Handshake
   const hsResp = await fetch(`${SIO_BASE}?EIO=4&transport=polling`, { headers: SIO_HEADERS });
   if (!hsResp.ok) throw new Error(`SIO handshake HTTP ${hsResp.status}`);
@@ -24,32 +40,26 @@ async function fetchLivePriceOfGoldSIO(): Promise<{ price: number; prevClose: nu
     body: '40',
   });
 
-  // Step 3: Poll for update events (up to 4 attempts, ~2s total)
+  // Step 3: Poll for update events (up to 4 attempts)
   for (let i = 0; i < 4; i++) {
     const pollResp = await fetch(`${SIO_BASE}?EIO=4&transport=polling&sid=${sid}`, { headers: SIO_HEADERS });
     if (!pollResp.ok) { await new Promise(r => setTimeout(r, 300)); continue; }
     const raw = await pollResp.text();
-    
-    // Socket.IO format: 42["update","{\"XAUUSD\":4393.54,...}"]
-    // The inner JSON has escaped quotes. Extract XAUUSD value directly.
+
     const xauMatch = raw.match(/XAUUSD[\\":\s]+([\d.]+)/);
     if (xauMatch) {
       const price = parseFloat(xauMatch[1]);
       if (!isNaN(price) && price > 0) {
-        // Also try to get open/prevClose
-        const openMatch = raw.match(/XAUOPEN[\\":\s]+([\d.]+)/);
-        const prevClose = openMatch ? parseFloat(openMatch[1]) : 0;
+        const prevClose = await prevClosePromise;
         return { price, prevClose, source: 'livepriceofgold-sio' };
       }
     }
-    
-    // Also check for "2" (ping) or "40{...}" (connect ack) - keep polling
     await new Promise(r => setTimeout(r, 400));
   }
-  throw new Error('SIO: no XAUUSD update received after 4 polls');
+  throw new Error('SIO: no XAUUSD update after 4 polls');
 }
 
-// ── FALLBACK 1: LivePriceOfGold.com HTML scrape ──
+// ── FALLBACK 1: LivePriceOfGold.com HTML scrape (has price + prevClose) ──
 async function fetchLivePriceOfGoldHTML(): Promise<{ price: number; prevClose: number; source: string }> {
   const r = await fetch('https://www.livepriceofgold.com/', {
     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': 'text/html' },
@@ -65,16 +75,26 @@ async function fetchLivePriceOfGoldHTML(): Promise<{ price: number; prevClose: n
   return { price, prevClose, source: 'livepriceofgold' };
 }
 
-// ── FALLBACK 2: TwelveData ──
+// ── FALLBACK 2: TwelveData (price endpoint + parallel quote for prevClose) ──
 async function fetchTwelveData(): Promise<{ price: number; prevClose: number; source: string }> {
   if (!TWELVE_DATA_KEY) throw new Error('twelvedata: no key');
-  const r = await fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  if (!r.ok) throw new Error(`twelvedata HTTP ${r.status}`);
-  const data = await r.json();
-  if (!data || data.status === 'error') throw new Error(`twelvedata: ${data?.message || 'error'}`);
-  const price = parseFloat(data.price);
+  const [priceResp, quoteResp] = await Promise.all([
+    fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+    fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } }),
+  ]);
+  if (!priceResp.ok) throw new Error(`twelvedata price HTTP ${priceResp.status}`);
+  const priceData = await priceResp.json();
+  if (!priceData || priceData.status === 'error') throw new Error(`twelvedata: ${priceData?.message || 'error'}`);
+  const price = parseFloat(priceData.price);
   if (isNaN(price) || price <= 0) throw new Error('twelvedata: invalid price');
-  return { price, prevClose: 0, source: 'twelvedata' };
+  let prevClose = 0;
+  try {
+    if (quoteResp.ok) {
+      const quoteData = await quoteResp.json();
+      prevClose = parseFloat(quoteData?.previous_close) || 0;
+    }
+  } catch { /* quote may fail on free tier, that's ok */ }
+  return { price, prevClose, source: 'twelvedata' };
 }
 
 // ── FALLBACK 3: GoldAPI.io ──
@@ -85,7 +105,7 @@ async function fetchGoldAPI(): Promise<{ price: number; prevClose: number; sourc
   const data = await r.json();
   const price = parseFloat(data?.price);
   if (isNaN(price) || price <= 0) throw new Error('goldapi: invalid price');
-  return { price, prevClose: parseFloat(data?.prev_close_price) || 0, source: 'goldapi' };
+  return { price, prevClose: parseFloat(data?.prev_close_price) || parseFloat(data?.open_price) || 0, source: 'goldapi' };
 }
 
 // ── FALLBACK 4: Alpha Vantage ──
@@ -102,18 +122,11 @@ async function fetchAlphaVantage(): Promise<{ price: number; prevClose: number; 
 
 // ── Price fetch: SIO first, then race fallbacks ──
 async function fetchLivePrice() {
-  // Try Socket.IO for real-time data first
   try { return await fetchLivePriceOfGoldSIO(); }
   catch (e) { console.error('SIO failed:', (e as Error).message); }
 
-  // Race HTML scrape + API sources
   try {
-    return await Promise.any([
-      fetchLivePriceOfGoldHTML(),
-      fetchTwelveData(),
-      fetchGoldAPI(),
-      fetchAlphaVantage(),
-    ]);
+    return await Promise.any([fetchLivePriceOfGoldHTML(), fetchTwelveData(), fetchGoldAPI(), fetchAlphaVantage()]);
   } catch {
     for (const fn of [fetchLivePriceOfGoldHTML, fetchTwelveData, fetchGoldAPI, fetchAlphaVantage]) {
       try { return await fn(); } catch { /* skip */ }
@@ -130,7 +143,6 @@ Deno.serve(async (req) => {
   const t0 = Date.now();
   const live = await fetchLivePrice();
   const fetchMs = Date.now() - t0;
-  
   if (!live) return new Response(JSON.stringify({ success: false, error: 'All price sources failed', timestamp: now }), { status: 503, headers });
 
   const change = live.prevClose > 0 ? live.price - live.prevClose : 0;
@@ -185,8 +197,7 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({
     success: true, timestamp: now, price: live.price, prevClose: live.prevClose, change, changePct,
     marketState: 'open', marketTime: Math.floor(Date.now() / 1000), priceSource: live.source,
-    fetchMs, // time to fetch price in ms
-    lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length,
+    fetchMs, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length,
     allTimeframes, overallSignal, longCount, shortCount, tradeHistory, stats,
   }), { status: 200, headers });
 });
