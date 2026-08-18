@@ -145,15 +145,21 @@ Deno.serve(async (req) => {
   const fetchMs = Date.now() - t0;
   if (!live) return new Response(JSON.stringify({ success: false, error: 'All price sources failed', timestamp: now }), { status: 503, headers });
 
-  const effectivePrevClose = (states?.__prevClose?.value || 0) || live.prevClose || 0; const change = effectivePrevClose > 0 ? live.price - effectivePrevClose : 0;
-  const changePct = effectivePrevClose > 0 ? (change / effectivePrevClose) * 100 : 0;
+  const change = live.prevClose > 0 ? live.price - live.prevClose : 0;
+  const changePct = live.prevClose > 0 ? (change / live.prevClose) * 100 : 0;
 
   let states: any = null, lastRun: string | null = null, lastTick: any = null;
   try {
     const r = await fetch(`${SUPA_URL}/rest/v1/trading_states?select=*&limit=1`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
     const data = await r.json();
-    if (data && data.length > 0) { states = data[0].states || {}; lastRun = data[0].last_run || null; lastTick = states?.__ticks || null; } const dbPrevClose = states?.__prevClose?.value || 0;
+    if (data && data.length > 0) { states = data[0].states || {}; lastRun = data[0].last_run || null; lastTick = states?.__ticks || null; }
   } catch (e) { console.error('State error:', (e as Error).message); }
+
+  // Override prevClose from DB (updated daily by update-prev-close function)
+  const dbPrevClose = states?.__prevClose?.value || 0;
+  const effectivePrevClose = dbPrevClose || live.prevClose || 0;
+  const finalChange = effectivePrevClose > 0 ? live.price - effectivePrevClose : change;
+  const finalChangePct = effectivePrevClose > 0 ? (finalChange / effectivePrevClose) * 100 : changePct;
 
   let tradeHistory: any[] = [];
   try {
@@ -195,7 +201,7 @@ Deno.serve(async (req) => {
   if (longCount > shortCount) overallSignal = 'bullish'; else if (shortCount > longCount) overallSignal = 'bearish';
 
   return new Response(JSON.stringify({
-    success: true, timestamp: now, price: live.price, prevClose: effectivePrevClose || live.prevClose, change, changePct,
+    success: true, timestamp: now, price: live.price, prevClose: effectivePrevClose || live.prevClose, change: finalChange, changePct: finalChangePct,
     marketState: 'open', marketTime: Math.floor(Date.now() / 1000), priceSource: live.source,
     fetchMs, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length,
     allTimeframes, overallSignal, longCount, shortCount, tradeHistory, stats,
