@@ -182,7 +182,7 @@ Deno.serve(async (req) => {
       const tpHits = [s.tp1Hit, s.tp2Hit, s.tp3Hit, s.tp4Hit, s.tp5Hit];
       const tpCount = tpHits.filter(Boolean).length;
       let status = 'waiting';
-      if (s.allDone) status = 'complete'; else if (s.slHit) status = 'stopped'; else if (s.entry > 0) status = 'active';
+      if (s.allDone) status = 'complete'; else if (s.slHit) status = "waiting"; else if (s.entry > 0) status = 'active';
       allTimeframes.push({ timeframe: tf, direction: s.dir || null, status, entry: s.entry || 0, sl: s.sl || 0, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit, tpProgress: tpCount, tpHits, cycle: s.cycle || 0, atr: s.atr || 0 });
       if (s && s.entry > 0 && !s.slHit && !s.allDone) activeTrades.push({ timeframe: tf, direction: s.dir, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit, cycle: s.cycle, atr: s.atr });
     }
