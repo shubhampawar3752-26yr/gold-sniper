@@ -181,7 +181,12 @@ Deno.serve(async (req) => {
     const s = state[tf];
     if (!s || s.entry === 0 || s.slHit || s.allDone) return null;
     const tpsHit = [s.tp1Hit, s.tp2Hit, s.tp3Hit, s.tp4Hit, s.tp5Hit].filter(Boolean).length;
-    return { tf, dir: s.dir, entry: s.entry, sl: s.sl, tpsHit, cycle: s.cycle, rsi: s.rsi, aiRec: s.aiRecommendation };
+    // Find entry time from alerts
+    const entryAlert = alerts.find(a => a.type === 'entry' && a.timeframe === tf && (a.cycle || 0) === (s.cycle || 0));
+    const entryTime = entryAlert ? String(entryAlert.created_at).substring(11, 19) : (s.lastRun ? String(s.lastRun).substring(11, 19) : '-');
+    return { tf, dir: s.dir, entry: s.entry, sl: s.sl, tpsHit, cycle: s.cycle, rsi: s.rsi, aiRec: s.aiRecommendation,
+      entryTime, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5,
+      tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit };
   }).filter(Boolean);
 
   // Totals
@@ -288,10 +293,13 @@ html += `</div>`;
   // Active trades
   if (activeTrades.length > 0) {
     html += `<div class="tf-section"><div class="tf-header"><span class="tf-name">🟢 Active Trades</span></div>`;
-    html += `<table><tr><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>TPs Hit</th><th>Cycle</th><th>RSI</th><th>AI</th></tr>`;
+    html += `<table><tr><th>TF</th><th>Entry Time</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>TP5</th><th>Hit</th><th>Cycle</th><th>AI</th></tr>`;
     activeTrades.forEach(t => {
       const dc = t.dir === 'long' ? 'green' : 'red';
-      html += `<tr><td><b>${t.tf}</b></td><td class="${dc}">${t.dir.toUpperCase()}</td><td>$${t.entry.toFixed(2)}</td><td>$${t.sl.toFixed(2)}</td><td>${t.tpsHit}/5</td><td>#${t.cycle}</td><td>${t.rsi ? Number(t.rsi).toFixed(1) : '-'}</td><td>${t.aiRec || '-'}</td></tr>`;
+      const tpCell = (hit, price) => hit
+        ? `<td class="green">✅ $${price ? price.toFixed(2) : '-'}</td>`
+        : `<td style="color:#555">⬜ $${price ? price.toFixed(2) : '-'}</td>`;
+      html += `<tr><td><b>${t.tf}</b></td><td style="color:#888;font-size:11px">${t.entryTime}</td><td class="${dc}">${t.dir.toUpperCase()}</td><td>$${t.entry.toFixed(2)}</td><td>$${t.sl.toFixed(2)}</td>${tpCell(t.tp1Hit, t.tp1)}${tpCell(t.tp2Hit, t.tp2)}${tpCell(t.tp3Hit, t.tp3)}${tpCell(t.tp4Hit, t.tp4)}${tpCell(t.tp5Hit, t.tp5)}<td><b>${t.tpsHit}/5</b></td><td>#${t.cycle}</td><td>${t.aiRec || '-'}</td></tr>`;
     });
     html += `</table></div>`;
   }

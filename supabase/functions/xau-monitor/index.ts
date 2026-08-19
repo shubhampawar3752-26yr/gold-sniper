@@ -102,10 +102,15 @@ async function supaSelect(table: string, limit = 1) {
   return await r.json();
 }
 async function supaInsert(table: string, data: any) {
-  await fetch(`${SUPA_URL}/rest/v1/${table}`, { method: 'POST', headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(data) });
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, { method: 'POST', headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=representation' }, body: JSON.stringify(data) });
+  if (!r.ok) {
+    const err = await r.text();
+    console.error(`Insert ${table} FAILED (${r.status}):`, err.substring(0, 200));
+  }
 }
 async function supaUpdate(table: string, data: any, id: number) {
-  await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(data) });
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(data) });
+  if (!r.ok) console.error(`Update ${table} FAILED (${r.status})`);
 }
 
 
@@ -240,9 +245,6 @@ Deno.serve(async (req) => {
         entry: s.entry, sl: s.sl,
         tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5 },
         cycle: s.cycle, price: tfPrice, sent: false,
-        atr: atr, rsi: tvData[`RSI|${tf.tv}`],
-        aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason,
-        aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence,
       });
       console.log(`🟡 ${l} initial ${signal.toUpperCase()} setup | entry=${s.entry} SL=${s.sl} ATR=${atr} | AI: ${aiCheck.reason}`);
     }
@@ -271,9 +273,6 @@ Deno.serve(async (req) => {
           entry: s.entry, sl: s.sl,
           tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5 },
           cycle: s.cycle, price: tfPrice, sent: false,
-          atr: atr, rsi: tvData[`RSI|${tf.tv}`],
-          aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason,
-          aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence,
         });
         console.log(`🟢 ${l} ${s.lastSignal.toUpperCase()} crossover | entry=${s.entry} SL=${s.sl} ATR=${atr} | AI: ${aiCheck.reason}`);
       }
