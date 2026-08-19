@@ -17,6 +17,16 @@ const TICKS = 3, TICK_MS = 10000;
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TV_SYMBOL = 'OANDA:XAUUSD';
+
+// ── Whipsaw filter: minimum minutes between signal flips per timeframe ──
+const FLIP_COOLDOWN_MS: Record<string, number> = {
+  '1M':  3 * 60 * 1000,   // 3 min
+  '5M':  5 * 60 * 1000,   // 5 min
+  '15M': 10 * 60 * 1000,  // 10 min
+  '30M': 15 * 60 * 1000,  // 15 min
+  '1H':  30 * 60 * 1000,  // 30 min
+  '4H':  60 * 60 * 1000,  // 60 min
+};
 const TV_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Origin': 'https://www.tradingview.com' };
 
 function hit(p: number, t: number, d: string) { return d === 'long' ? p >= t : p <= t; }
@@ -210,8 +220,19 @@ Deno.serve(async (req) => {
       
       const flipUp = (crossUp || alreadyFlippedUp) && s.dir === 'short';
       const flipDn = (crossDn || alreadyFlippedDn) && s.dir === 'long';
-      
-      if (flipUp || flipDn) {
+
+      // ── Whipsaw filter: skip flip if within cooldown period ──
+      const cooldownMs = FLIP_COOLDOWN_MS[l] || 0;
+      const lastFlipTime = s.lastFlipTime ? new Date(s.lastFlipTime).getTime() : 0;
+      const sinceLastFlip = Date.now() - lastFlipTime;
+      const inCooldown = cooldownMs > 0 && sinceLastFlip < cooldownMs;
+
+      if (inCooldown && (flipUp || flipDn)) {
+        console.log(`⏸️  ${l} whipsaw filter: flip suppressed (${Math.floor(sinceLastFlip/1000)}s < ${cooldownMs/1000}s cooldown)`);
+      }
+
+      if ((flipUp || flipDn) && !inCooldown) {
+        s.lastFlipTime = new Date().toISOString();
         alerts.push({
           type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice,
           sent: false,
@@ -254,7 +275,18 @@ Deno.serve(async (req) => {
       const crossUp = prevEma9 <= prevEma21 && ema9 > ema21;
       const crossDn = prevEma9 >= prevEma21 && ema9 < ema21;
       
-      if ((crossUp || crossDn) && s.lastSignal !== (crossUp ? 'buy' : 'sell')) {
+      // ── Whipsaw filter for new crossover entries ──
+      const cooldownMs2 = FLIP_COOLDOWN_MS[l] || 0;
+      const lastFlipTime2 = s.lastFlipTime ? new Date(s.lastFlipTime).getTime() : 0;
+      const sinceLastFlip2 = Date.now() - lastFlipTime2;
+      const inCooldown2 = cooldownMs2 > 0 && sinceLastFlip2 < cooldownMs2;
+
+      if (inCooldown2 && (crossUp || crossDn)) {
+        console.log(`⏸️  ${l} whipsaw filter: new entry suppressed (${Math.floor(sinceLastFlip2/1000)}s < ${cooldownMs2/1000}s cooldown)`);
+      }
+
+      if ((crossUp || crossDn) && s.lastSignal !== (crossUp ? 'buy' : 'sell') && !inCooldown2) {
+        s.lastFlipTime = new Date().toISOString();
         s.dir = crossUp ? 'long' : 'short';
         s.cycle++;
         s.entry = tfPrice || livePrice || 0;
