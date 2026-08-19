@@ -287,7 +287,7 @@ Deno.serve(async (req) => {
     const cycles = new Map();
     function getCycle(c) {
       if (!c) c = 0;
-      if (!cycles.has(c)) cycles.set(c, { entry: null, dir: '', sl: null, tps: {}, slHit: false, allDone: false });
+      if (!cycles.has(c)) cycles.set(c, { entry: null, dir: '', sl: null, tps: {}, slHit: false, allDone: false, entryTime: '', tpTimes: {} });
       return cycles.get(c);
     }
     for (const a of d.entries) {
@@ -296,6 +296,7 @@ Deno.serve(async (req) => {
       cy.dir = a.direction || '';
       cy.sl = a.sl ? Number(a.sl) : null;
       if (a.tp) cy.tpPrices = [a.tp.tp1, a.tp.tp2, a.tp.tp3, a.tp.tp4, a.tp.tp5];
+      cy.entryTime = String(a.created_at).substring(11, 19);
     }
     for (const a of d.tps) {
       let c = a.cycle;
@@ -306,6 +307,7 @@ Deno.serve(async (req) => {
       if (!cy.sl) cy.sl = getSL(tf, a);
       const tpN = a.tp_num || a.tpNum || 0;
       cy.tps[tpN] = Number(a.tp_price || a.tpPrice || 0);
+      cy.tpTimes[tpN] = String(a.created_at).substring(11, 19);
     }
     for (const a of d.sls) {
       const cy = getCycle(a.cycle);
@@ -317,7 +319,7 @@ Deno.serve(async (req) => {
     for (const a of d.dones) { getCycle(a.cycle).allDone = true; }
     
     if (cycles.size > 0) {
-      html += `<table style="margin-top:10px"><tr><th>#</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>TP5</th><th>Status</th></tr>`;
+      html += `<table style="margin-top:10px"><tr><th>#</th><th>Time</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>TP5</th><th>Status</th></tr>`;
       const sorted = Array.from(cycles.entries()).sort(function(a, b) { return b[0] - a[0]; });
       for (const pair of sorted) {
         const cNum = pair[0], cy = pair[1];
@@ -333,7 +335,8 @@ Deno.serve(async (req) => {
         for (let i = 1; i <= 5; i++) {
           const hit = cy.tps[i] != null;
           const price = hit ? cy.tps[i] : (tpPrices[i-1] || 0);
-          if (hit) tpCols += `<td class="green">✅ $${price.toFixed(2)}</td>`;
+          const tpTime = cy.tpTimes[i] || '';
+        if (hit) tpCols += `<td class="green">✅ $${price.toFixed(2)}<br><span style="font-size:10px;color:#888">${tpTime}</span></td>`;
           else if (price) tpCols += `<td style="color:#555">⬜ $${price.toFixed(2)}</td>`;
           else tpCols += `<td style="color:#444">-</td>`;
         }
@@ -341,7 +344,7 @@ Deno.serve(async (req) => {
         if (cy.allDone) { status = '🎉 FULL'; statusClass = 'gold'; }
         else if (cy.slHit) { status = '🛑 SL'; statusClass = 'red'; }
         else { status = '🟢 ' + Object.keys(cy.tps).length + '/5'; statusClass = 'green'; }
-        html += `<tr><td>#${cNum}</td><td class="${dirClass}">${dirText}</td><td>${cy.entry ? '$' + cy.entry.toFixed(2) : '-'}</td><td>${cy.sl ? '$' + cy.sl.toFixed(2) : '-'}</td>${tpCols}<td class="${statusClass}"><b>${status}</b></td></tr>`;
+        html += `<tr><td>#${cNum}</td><td style="color:#888;font-size:11px">${cy.entryTime || '-'}</td><td class="${dirClass}">${dirText}</td><td>${cy.entry ? '$' + cy.entry.toFixed(2) : '-'}</td><td>${cy.sl ? '$' + cy.sl.toFixed(2) : '-'}</td>${tpCols}<td class="${statusClass}"><b>${status}</b></td></tr>`;
       }
       html += `</table>`;
     }
