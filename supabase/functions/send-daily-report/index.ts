@@ -156,7 +156,21 @@ Deno.serve(async (req) => {
     const tps = tfAlerts.filter(a => a.type === 'tp');
     const sls = tfAlerts.filter(a => a.type === 'sl');
     const dones = tfAlerts.filter(a => a.type === 'alldone');
-    const wins = new Set(tps.map(a => a.cycle).filter(Boolean)).size;
+    
+    // Win rate: TP alerts don't have cycle numbers, so we group TPs by which
+    // entry they belong to using time-based lookup. Each unique entry that had
+    // at least 1 TP = 1 win. Each SL = 1 loss.
+    const winningEntries = new Set<string>();
+    for (const tp of tps) {
+      const matched = findEntryByTime(tf, tp.created_at);
+      if (matched) {
+        winningEntries.add(matched.created_at);
+      } else {
+        // No entry found (entry was before our lookup range) — count as unique win by TP time
+        winningEntries.add(tp.created_at);
+      }
+    }
+    const wins = winningEntries.size;
     const losses = sls.length;
     const winRate = (wins + losses) > 0 ? Math.round((wins / (wins + losses)) * 100) : 0;
     tfData[tf] = { entries, tps, sls, dones, wins, losses, winRate, cycles: entries.length };
