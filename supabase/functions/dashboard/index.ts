@@ -128,6 +128,9 @@ const HTML = `<!DOCTYPE html>
     <div class="price-change" id="priceChange"></div>
     <div class="price-meta">
       <span>Prev Close: <strong id="prevClose" style="color:#aaa">—</strong></span>
+      <span>Open: <strong id="dayOpen" style="color:#aaa">—</strong></span>
+      <span>High: <strong id="dayHigh" style="color:#39ff14">—</strong></span>
+      <span>Low: <strong id="dayLow" style="color:#ff3b3b">—</strong></span>
       <span>Market: <span class="market-state unknown" id="marketState">—</span></span>
       <span>Last Tick: <strong id="lastTick" style="color:#aaa">—</strong></span>
     </div>
@@ -211,6 +214,9 @@ async function fetchDashboard() {
     lastPrice = newPrice;
 
     document.getElementById('prevClose').textContent = '$' + fmtPrice(data.prevClose);
+    if (data.dayOpen) document.getElementById('dayOpen').textContent = '$' + fmtPrice(data.dayOpen);
+    if (data.dayHigh) document.getElementById('dayHigh').textContent = '$' + fmtPrice(data.dayHigh);
+    if (data.dayLow) document.getElementById('dayLow').textContent = '$' + fmtPrice(data.dayLow);
 
     const changeEl = document.getElementById('priceChange');
     const chg = data.change || 0;
