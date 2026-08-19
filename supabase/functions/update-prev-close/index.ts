@@ -10,14 +10,17 @@ const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 //   1. TwelveData quote API -> previous_close field
 //   2. Alpha Vantage -> GLOBAL_QUOTE -> 08. previous close
 //   3. livepriceofgold.com -> data-open attribute (today's open = yesterday's close)
-//   4. DB fallback -> keep last known good value (don't overwrite with 0)
+//   4. TradingView scanner -> close - change_abs (computed prevClose)
+//   5. DB fallback -> keep last known good value (don't overwrite with 0)
 //
 // Smart: if already updated today, skip (prevent stale overwrite from repeated calls)
+
+const TV_SYMBOL = 'OANDA:XAUUSD';
+const TV_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Origin': 'https://www.tradingview.com' };
 
 Deno.serve(async (req) => {
   const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
 
-  // Get today's date in IST
   const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
@@ -106,7 +109,38 @@ Deno.serve(async (req) => {
     } catch (e) { console.error('LPOG failed:', (e as Error).message); }
   }
 
-  // ── Source 4: DB fallback — keep last known good value ──
+  // ── Source 4: TradingView scanner (close - change_abs = prevClose) ──
+  if (prevClose === 0) {
+    try {
+      const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(TV_SYMBOL)}&fields=close,change_abs,open`;
+      const r = await fetch(url, { headers: TV_HEADERS });
+      if (r.ok) {
+        const data = await r.json();
+        const close = parseFloat(data?.close);
+        const changeAbs = parseFloat(data?.change_abs);
+        // Primary: close - change_abs (TradingView's actual prevClose)
+        if (!isNaN(close) && !isNaN(changeAbs) && close > 0 && changeAbs > 0) {
+          const pc = close - changeAbs;
+          if (pc > 0) {
+            prevClose = pc;
+            source = 'tradingview';
+            console.log(`TradingView prevClose: ${pc} (close=${close} - change_abs=${changeAbs})`);
+          }
+        }
+        // Fallback: open price (today's open ~ yesterday's close)
+        if (prevClose === 0) {
+          const open = parseFloat(data?.open);
+          if (!isNaN(open) && open > 0) {
+            prevClose = open;
+            source = 'tradingview-open';
+            console.log(`TradingView open as prevClose: ${open}`);
+          }
+        }
+      }
+    } catch (e) { console.error('TradingView failed:', (e as Error).message); }
+  }
+
+  // ── Source 5: DB fallback — keep last known good value ──
   if (prevClose === 0 && dbPrevClose > 0) {
     prevClose = dbPrevClose;
     source = 'db-fallback';
