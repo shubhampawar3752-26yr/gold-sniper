@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
       if (flipUp || flipDn) {
         alerts.push({
           type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice,
-          sent: false, reason: 'signal_flip',
+          sent: false,
         });
         s.slHit = true;
         console.log(`🔴 ${l} signal FLIP → closing ${s.dir} trade (cycle ${s.cycle}), starting new cycle`);
