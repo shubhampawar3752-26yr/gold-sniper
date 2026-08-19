@@ -27,9 +27,11 @@ Deno.serve(async (req) => {
   let alertUrl;
   if (mode === 'morning') {
     const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
-    alertUrl = `${SUPA_URL}/rest/v1/alerts?created_at=gte.${since}&order=created_at.asc&limit=1000`;
+    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=1000`;
+    // Note: tp is a JSONB field with tp1-tp5 + AI info for entry alerts
   } else {
     alertUrl = `${SUPA_URL}/rest/v1/alerts?created_at=gte.${today}T00:00:00&order=created_at.asc&limit=1000`;
+    // Note: select=* includes tp JSONB field with tp1-tp5 for entry alerts
   }
 
   const r = await fetch(alertUrl, {
@@ -47,7 +49,7 @@ Deno.serve(async (req) => {
   // Fetch ALL entry alerts for time-based entry price lookup
   // TP/SL alerts don't carry entry/direction/cycle fields, so we match by timeframe + time
   const rEntries = await fetch(
-    `${SUPA_URL}/rest/v1/alerts?type=eq.entry&order=created_at.asc&limit=2000`,
+    `${SUPA_URL}/rest/v1/alerts?type=eq.entry&select=id,type,timeframe,direction,entry,sl,tp,cycle,price,created_at&order=created_at.asc&limit=2000`,
     { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
   );
   const allEntryAlerts: any[] = await rEntries.json();
@@ -256,7 +258,7 @@ Deno.serve(async (req) => {
     d.dones.forEach(a => allEvents.push({ time: String(a.created_at).substring(11, 19), type: 'alldone', data: a }));
     allEvents.sort((a, b) => a.time.localeCompare(b.time));
 
-    html += `<table><tr><th>Time</th><th>Event</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP #</th><th>TP Price</th><th>Price</th><th>Cycle</th></tr>`;
+    html += `<table><tr><th>Time</th><th>Event</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP #</th><th>TP Price</th><th>TP Levels</th><th>Price</th><th>Cycle</th></tr>`;
     
     for (const ev of allEvents) {
       const a = ev.data;
@@ -274,6 +276,18 @@ Deno.serve(async (req) => {
       const entryPrice = getEntry(tf, a);
       const slPrice = getSL(tf, a);
       
+      // For entry alerts, show TP1-TP5 levels from the tp JSON field
+      let tpLevels = '-';
+      if (ev.type === 'entry' && a.tp) {
+        const tp = a.tp;
+        const parts = [];
+        if (tp.tp1) parts.push(`TP1:$${Number(tp.tp1).toFixed(2)}`);
+        if (tp.tp2) parts.push(`TP2:$${Number(tp.tp2).toFixed(2)}`);
+        if (tp.tp3) parts.push(`TP3:$${Number(tp.tp3).toFixed(2)}`);
+        if (tp.tp4) parts.push(`TP4:$${Number(tp.tp4).toFixed(2)}`);
+        if (tp.tp5) parts.push(`TP5:$${Number(tp.tp5).toFixed(2)}`);
+        tpLevels = parts.length > 0 ? `<span style="font-size:11px">${parts.join(' ')}</span>` : '-';
+      }
       html += `<tr class="event-row">
         <td class="time-col">${ev.time}</td>
         <td class="${eventClass}"><b>${icon}</b></td>
@@ -282,6 +296,7 @@ Deno.serve(async (req) => {
         <td>${slPrice ? '$' + slPrice.toFixed(2) : '-'}</td>
         <td>${a.tp_num || a.tpNum || '-'}</td>
         <td>${(a.tp_price || a.tpPrice) ? '$' + Number(a.tp_price || a.tpPrice).toFixed(2) : '-'}</td>
+        <td>${tpLevels}</td>
         <td>${a.price ? '$' + Number(a.price).toFixed(2) : '-'}</td>
         <td>#${a.cycle || '-'}</td>
       </tr>`;

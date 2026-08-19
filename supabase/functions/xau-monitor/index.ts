@@ -243,7 +243,7 @@ Deno.serve(async (req) => {
       alerts.push({
         type: 'entry', timeframe: l, direction: signal,
         entry: s.entry, sl: s.sl,
-        tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5 },
+        tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, atr: atr, rsi: tvData[`RSI|${tf.tv}`], aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
         cycle: s.cycle, price: tfPrice, sent: false,
       });
       console.log(`🟡 ${l} initial ${signal.toUpperCase()} setup | entry=${s.entry} SL=${s.sl} ATR=${atr} | AI: ${aiCheck.reason}`);
@@ -271,7 +271,7 @@ Deno.serve(async (req) => {
         alerts.push({
           type: 'entry', timeframe: l, direction: s.lastSignal,
           entry: s.entry, sl: s.sl,
-          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5 },
+          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, atr: atr, rsi: tvData[`RSI|${tf.tv}`], aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
           cycle: s.cycle, price: tfPrice, sent: false,
         });
         console.log(`🟢 ${l} ${s.lastSignal.toUpperCase()} crossover | entry=${s.entry} SL=${s.sl} ATR=${atr} | AI: ${aiCheck.reason}`);

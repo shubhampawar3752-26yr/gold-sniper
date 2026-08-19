@@ -163,7 +163,7 @@ Deno.serve(async (req) => {
 
   let tradeHistory: any[] = [];
   try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/alerts?select=id,type,timeframe,direction,entry,sl,price,tp_num,tp_price,progress,cycle,created_at&type=neq.test&order=created_at.desc&limit=20`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
+    const r = await fetch(`${SUPA_URL}/rest/v1/alerts?select=id,type,timeframe,direction,entry,sl,tp,price,tp_num,tp_price,progress,cycle,created_at&type=neq.test&order=created_at.desc&limit=20`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
     tradeHistory = await r.json();
   } catch (e) { console.error('History error:', (e as Error).message); }
 
