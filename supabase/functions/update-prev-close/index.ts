@@ -38,8 +38,9 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error('DB read failed:', (e as Error).message); }
 
-  // If already updated today, skip
-  if (dbPrevDate === today && dbPrevClose > 0) {
+  // If already updated today, skip (unless ?force=true)
+  const forceUpdate = new URL(req.url).searchParams.get('force') === 'true';
+  if (dbPrevDate === today && dbPrevClose > 0 && !forceUpdate) {
     return new Response(JSON.stringify({
       success: true,
       ...dbStates.__prevClose,
