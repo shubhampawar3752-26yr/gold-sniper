@@ -38,17 +38,18 @@ function ns() {
 
 function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
   if (s.allDone || s.slHit || s.entry === 0) return;
+  const dir = s.dir === 'long' ? 'buy' : 'sell';
   if (slHit(px, s.sl, s.dir)) {
-    if (!prev.slHit) al.push({ type: 'sl', timeframe: l, sl: s.sl, entry: s.entry, price: px, sent: false });
+    if (!prev.slHit) al.push({ type: 'sl', timeframe: l, sl: s.sl, entry: s.entry, direction: dir, cycle: s.cycle, price: px, sent: false });
     s.slHit = true; return;
   }
-  if (!s.tp1Hit && hit(px, s.tp1, s.dir)) { s.tp1Hit = true; if (!prev.tp1) al.push({ type: 'tp', timeframe: l, tp_num: 1, tp_price: s.tp1, price: px, progress: 1, sent: false }); }
-  if (s.tp1Hit && !s.tp2Hit && hit(px, s.tp2, s.dir)) { s.tp2Hit = true; if (!prev.tp2) al.push({ type: 'tp', timeframe: l, tp_num: 2, tp_price: s.tp2, price: px, progress: 2, sent: false }); }
-  if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) { s.tp3Hit = true; if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, price: px, progress: 3, sent: false }); }
-  if (s.tp3Hit && !s.tp4Hit && hit(px, s.tp4, s.dir)) { s.tp4Hit = true; if (!prev.tp4) al.push({ type: 'tp', timeframe: l, tp_num: 4, tp_price: s.tp4, price: px, progress: 4, sent: false }); }
-  if (s.tp4Hit && !s.tp5Hit && hit(px, s.tp5, s.dir)) { s.tp5Hit = true; if (!prev.tp5) al.push({ type: 'tp', timeframe: l, tp_num: 5, tp_price: s.tp5, price: px, progress: 5, sent: false }); }
+  if (!s.tp1Hit && hit(px, s.tp1, s.dir)) { s.tp1Hit = true; if (!prev.tp1) al.push({ type: 'tp', timeframe: l, tp_num: 1, tp_price: s.tp1, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 1, sent: false }); }
+  if (s.tp1Hit && !s.tp2Hit && hit(px, s.tp2, s.dir)) { s.tp2Hit = true; if (!prev.tp2) al.push({ type: 'tp', timeframe: l, tp_num: 2, tp_price: s.tp2, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 2, sent: false }); }
+  if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) { s.tp3Hit = true; if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 3, sent: false }); }
+  if (s.tp3Hit && !s.tp4Hit && hit(px, s.tp4, s.dir)) { s.tp4Hit = true; if (!prev.tp4) al.push({ type: 'tp', timeframe: l, tp_num: 4, tp_price: s.tp4, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 4, sent: false }); }
+  if (s.tp4Hit && !s.tp5Hit && hit(px, s.tp5, s.dir)) { s.tp5Hit = true; if (!prev.tp5) al.push({ type: 'tp', timeframe: l, tp_num: 5, tp_price: s.tp5, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 5, sent: false }); }
   if (s.tp1Hit && s.tp2Hit && s.tp3Hit && s.tp4Hit && s.tp5Hit) {
-    if (!prev.allDone) { s.allDone = true; al.push({ type: 'alldone', timeframe: l, entry: s.entry, cycle: s.cycle, price: px, sent: false }); }
+    if (!prev.allDone) { s.allDone = true; al.push({ type: 'alldone', timeframe: l, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, sent: false }); }
   }
 }
 
@@ -207,7 +208,7 @@ Deno.serve(async (req) => {
       
       if (flipUp || flipDn) {
         alerts.push({
-          type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, price: tfPrice,
+          type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice,
           sent: false, reason: 'signal_flip',
         });
         s.slHit = true;
