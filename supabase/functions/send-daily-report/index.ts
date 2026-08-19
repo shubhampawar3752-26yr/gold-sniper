@@ -256,8 +256,9 @@ Deno.serve(async (req) => {
     for (const ev of allEvents) {
       const a = ev.data;
       let icon, eventClass;
+      const tpNum = a.tp_num || a.tpNum || '';
       if (ev.type === 'entry') { icon = '🟢 ENTRY'; eventClass = 'green'; }
-      else if (ev.type === 'tp') { icon = '✅ TP HIT'; eventClass = 'green'; }
+      else if (ev.type === 'tp') { icon = `✅ TP ${tpNum} HIT`; eventClass = 'green'; }
       else if (ev.type === 'sl') { icon = '🛑 SL HIT'; eventClass = 'red'; }
       else { icon = '🎉 FULL CYCLE'; eventClass = 'gold'; }
       
@@ -339,7 +340,8 @@ Deno.serve(async (req) => {
     }
     for (const a of d.tps) {
       const t = String(a.created_at).substring(11, 19);
-      waMsg += `  ✅ ${t} TP${a.tp_num||'?'} $${Number(a.tp_price||0).toFixed(2)} (entry $${getEntry(tf,a)?.toFixed(2)||'?'}) #${a.cycle}\n`;
+      const tpN = a.tp_num || a.tpNum || '?';
+      waMsg += `  ✅ ${t} TP ${tpN} HIT $${Number(a.tp_price||0).toFixed(2)} (entry $${getEntry(tf,a)?.toFixed(2)||'?'}) #${a.cycle}\n`;
     }
     for (const a of d.sls) {
       const t = String(a.created_at).substring(11, 19);
