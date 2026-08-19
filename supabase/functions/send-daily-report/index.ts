@@ -46,8 +46,17 @@ Deno.serve(async (req) => {
   const states: any[] = await r2.json();
   const state = states[0]?.states || {};
 
-  // ── Build cycle→entry map per TF (from entry alerts + trading state) ──
-  // This lets us show entry price on TP/SL/done rows even if the alert itself doesn't have it
+  // Fetch ALL entry alerts (not limited to report period) — needed to resolve entry price
+  // for TP/SL hits whose originating entry happened before this report's time window
+  const rEntries = await fetch(
+    `${SUPA_URL}/rest/v1/alerts?type=eq.entry&order=created_at.desc&limit=1000`,
+    { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
+  );
+  const allEntryAlerts: any[] = await rEntries.json();
+
+  // ── Build cycle→entry map per TF (from ALL-time entry alerts + trading state) ──
+  // This lets us show entry price on TP/SL/done rows even if the originating entry
+  // happened outside the current report window, or the alert itself doesn't carry it
   const cycleEntryMap: Record<string, Record<number, number>> = {}; // tf → cycle → entryPrice
   const cycleDirMap: Record<string, Record<number, string>> = {};   // tf → cycle → direction
   const cycleSLMap: Record<string, Record<number, number>> = {};     // tf → cycle → SL
@@ -56,19 +65,19 @@ Deno.serve(async (req) => {
     cycleEntryMap[tf] = {};
     cycleDirMap[tf] = {};
     cycleSLMap[tf] = {};
-    // From entry alerts
-    const tfEntries = alerts.filter(a => a.timeframe === tf && a.type === 'entry');
+    // From ALL-time entry alerts (desc order, so first match per cycle wins = most recent)
+    const tfEntries = allEntryAlerts.filter(a => a.timeframe === tf);
     for (const a of tfEntries) {
-      if (a.entry && a.cycle) {
+      if (a.entry && a.cycle != null && cycleEntryMap[tf][a.cycle] === undefined) {
         cycleEntryMap[tf][a.cycle] = Number(a.entry);
         cycleDirMap[tf][a.cycle] = a.direction || '';
         cycleSLMap[tf][a.cycle] = Number(a.sl) || 0;
       }
     }
-    // From trading state (for active cycles that may not have an entry alert today)
+    // From trading state (for active cycles that may not have an entry alert stored)
     const s = state[tf];
-    if (s && s.entry && s.cycle) {
-      if (!cycleEntryMap[tf][s.cycle]) {
+    if (s && s.entry && s.cycle != null) {
+      if (cycleEntryMap[tf][s.cycle] === undefined) {
         cycleEntryMap[tf][s.cycle] = Number(s.entry);
         cycleDirMap[tf][s.cycle] = s.dir || '';
         cycleSLMap[tf][s.cycle] = Number(s.sl) || 0;
