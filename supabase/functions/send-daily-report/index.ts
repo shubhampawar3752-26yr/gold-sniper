@@ -1,10 +1,9 @@
 // ── Gold Sniper: Daily Trade History Email ──
 // Runs daily at 23:00 IST — sends today's trade history to shubhampawar3752@gmail.com
-// Uses Resend API (free tier: 100 emails/day) — needs RESEND_API_KEY env var
+// Uses FormSubmit.co — free, no signup, no API key needed
 
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const RESEND_KEY = Deno.env.get('RESEND_API_KEY') || '';
 const TO_EMAIL = 'shubhampawar3752@gmail.com';
 
 Deno.serve(async (req) => {
@@ -44,127 +43,107 @@ Deno.serve(async (req) => {
     };
   }).filter(Boolean);
 
-  // Build HTML email
-  let html = `
-<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-  body { font-family: 'Segoe UI', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; margin: 0; padding: 20px; }
-  .header { text-align: center; padding: 20px; background: linear-gradient(135deg, #1a1a25, #12121a); border-radius: 12px; border: 1px solid #333; margin-bottom: 20px; }
-  .header h1 { color: #FFD700; margin: 0; font-size: 24px; letter-spacing: 2px; }
-  .header .date { color: #888; font-size: 14px; margin-top: 8px; }
-  .section { background: #1a1a25; border: 1px solid #333; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .section h2 { color: #FFD700; font-size: 16px; margin: 0 0 12px 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: #888; padding: 8px 6px; border-bottom: 1px solid #333; }
-  td { padding: 8px 6px; border-bottom: 1px solid #222; }
-  .green { color: #00e676; } .red { color: #ff4444; } .gold { color: #FFD700; }
-  .stat { display: inline-block; text-align: center; padding: 12px 20px; background: #12121a; border: 1px solid #333; border-radius: 8px; margin: 4px; }
-  .stat .num { font-size: 28px; font-weight: bold; } .stat .label { font-size: 11px; color: #888; }
-  .summary { text-align: center; margin-bottom: 16px; }
-</style></head><body>
-<div class="header">
-  <h1>🎯 GOLD SNIPER — Daily Trade Report</h1>
-  <div class="date">${now} (IST)</div>
-</div>
-<div class="summary">
-  <div class="stat"><div class="num gold">${entries.length}</div><div class="label">ENTRIES</div></div>
-  <div class="stat"><div class="num green">${tps.length}</div><div class="label">TP HITS</div></div>
-  <div class="stat"><div class="num red">${sls.length}</div><div class="label">SL HITS</div></div>
-  <div class="stat"><div class="num gold">${dones.length}</div><div class="label">FULL CYCLES</div></div>
-  <div class="stat"><div class="num green">${activeTrades.length}</div><div class="label">ACTIVE TRADES</div></div>
-</div>
-`;
+  // Build plain text email body
+  let body = `🎯 GOLD SNIPER — Daily Trade Report\n${now} (IST)\n\n`;
+  body += `═══════════════════════════════════════\n`;
+  body += `SUMMARY\n`;
+  body += `═══════════════════════════════════════\n`;
+  body += `Entries:       ${entries.length}\n`;
+  body += `TP Hits:       ${tps.length}\n`;
+  body += `SL Hits:       ${sls.length}\n`;
+  body += `Full Cycles:   ${dones.length}\n`;
+  body += `Active Trades: ${activeTrades.length}\n\n`;
 
-  // Active trades section
+  // Active trades
   if (activeTrades.length > 0) {
-    html += `<div class="section"><h2>🟢 Active Trades</h2><table><tr><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>TPs Hit</th><th>Cycle</th></tr>`;
+    body += `═══════════════════════════════════════\n`;
+    body += `🟢 ACTIVE TRADES\n`;
+    body += `═══════════════════════════════════════\n`;
     activeTrades.forEach(t => {
-      const dirColor = t.dir === 'long' ? 'green' : 'red';
-      html += `<tr><td><b>${t.tf}</b></td><td class="${dirColor}">${t.dir.toUpperCase()}</td><td>${t.entry.toFixed(2)}</td><td>${t.sl.toFixed(2)}</td><td>${t.tpsHit}/5</td><td>#${t.cycle}</td></tr>`;
+      body += `\n[${t.tf}] ${t.dir.toUpperCase()} | Entry: ${t.entry.toFixed(2)} | SL: ${t.sl.toFixed(2)} | TPs: ${t.tpsHit}/5 | Cycle: #${t.cycle}\n`;
+      body += `  TP Levels: ${t.tps.map(tp => tp?.toFixed(2)).join(' → ')}\n`;
     });
-    html += `</table></div>`;
+    body += `\n`;
   }
 
   // Today's entries
   if (entries.length > 0) {
-    html += `<div class="section"><h2>🟢 Today's Entries</h2><table><tr><th>Time</th><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>AI</th></tr>`;
+    body += `═══════════════════════════════════════\n`;
+    body += `🟢 TODAY'S ENTRIES\n`;
+    body += `═══════════════════════════════════════\n`;
     entries.forEach(a => {
       const t = String(a.created_at).substring(11, 19);
-      const dirColor = a.direction === 'buy' ? 'green' : 'red';
-      html += `<tr><td>${t}</td><td><b>${a.timeframe}</b></td><td class="${dirColor}">${(a.direction || '').toUpperCase()}</td><td>${a.entry?.toFixed(2) || '-'}</td><td>${a.sl?.toFixed(2) || '-'}</td><td>${a.aiReason || '-'}</td></tr>`;
+      body += `${t} | ${a.timeframe} | ${(a.direction || '').toUpperCase()} | Entry: ${a.entry?.toFixed(2) || '-'} | SL: ${a.sl?.toFixed(2) || '-'} | AI: ${a.aiReason || '-'}\n`;
     });
-    html += `</table></div>`;
+    body += `\n`;
   }
 
   // TP hits
   if (tps.length > 0) {
-    html += `<div class="section"><h2>✅ TP Hits Today</h2><table><tr><th>Time</th><th>TF</th><th>TP #</th><th>TP Price</th><th>Price</th></tr>`;
+    body += `═══════════════════════════════════════\n`;
+    body += `✅ TP HITS TODAY\n`;
+    body += `═══════════════════════════════════════\n`;
     tps.forEach(a => {
       const t = String(a.created_at).substring(11, 19);
-      html += `<tr><td>${t}</td><td><b>${a.timeframe}</b></td><td>TP${a.tpNum || a.tp_num || '?'}</td><td>${(a.tpPrice || a.tp_price || 0).toFixed(2)}</td><td>${a.price?.toFixed(2) || '-'}</td></tr>`;
+      body += `${t} | ${a.timeframe} | TP${a.tpNum || a.tp_num || '?'} | TP: ${(a.tpPrice || a.tp_price || 0).toFixed(2)} | Price: ${a.price?.toFixed(2) || '-'}\n`;
     });
-    html += `</table></div>`;
+    body += `\n`;
   }
 
   // SL hits
   if (sls.length > 0) {
-    html += `<div class="section"><h2>🛑 SL Hits Today</h2><table><tr><th>Time</th><th>TF</th><th>Entry</th><th>SL</th><th>Exit Price</th></tr>`;
+    body += `═══════════════════════════════════════\n`;
+    body += `🛑 SL HITS TODAY\n`;
+    body += `═══════════════════════════════════════\n`;
     sls.forEach(a => {
       const t = String(a.created_at).substring(11, 19);
-      html += `<tr><td>${t}</td><td><b>${a.timeframe}</b></td><td>${a.entry?.toFixed(2) || '-'}</td><td>${a.sl?.toFixed(2) || '-'}</td><td>${a.price?.toFixed(2) || '-'}</td></tr>`;
+      body += `${t} | ${a.timeframe} | Entry: ${a.entry?.toFixed(2) || '-'} | SL: ${a.sl?.toFixed(2) || '-'} | Exit: ${a.price?.toFixed(2) || '-'}\n`;
     });
-    html += `</table></div>`;
+    body += `\n`;
   }
 
   // Full cycles
   if (dones.length > 0) {
-    html += `<div class="section"><h2>🎉 Full Cycle Completions</h2><table><tr><th>Time</th><th>TF</th><th>Entry</th><th>Final Price</th><th>Cycle</th></tr>`;
+    body += `═══════════════════════════════════════\n`;
+    body += `🎉 FULL CYCLE COMPLETIONS\n`;
+    body += `═══════════════════════════════════════\n`;
     dones.forEach(a => {
       const t = String(a.created_at).substring(11, 19);
-      html += `<tr><td>${t}</td><td><b>${a.timeframe}</b></td><td>${a.entry?.toFixed(2) || '-'}</td><td>${a.price?.toFixed(2) || '-'}</td><td>#${a.cycle || '-'}</td></tr>`;
+      body += `${t} | ${a.timeframe} | Entry: ${a.entry?.toFixed(2) || '-'} | Final: ${a.price?.toFixed(2) || '-'} | Cycle: #${a.cycle || '-'}\n`;
     });
-    html += `</table></div>`;
+    body += `\n`;
   }
 
   if (entries.length === 0 && tps.length === 0 && sls.length === 0) {
-    html += `<div class="section" style="text-align:center;color:#888;padding:30px;">No trades today. System monitoring active 24/7.</div>`;
+    body += `\nNo trades today. System monitoring active 24/7.\n`;
   }
 
-  html += `<div style="text-align:center;color:#555;font-size:11px;margin-top:20px;">Gold Sniper Trading System • EMA 9/21 Crossover • ${TFS.join(' / ')} • Auto-generated daily report</div>`;
-  html += `</body></html>`;
+  body += `\n═══════════════════════════════════════\n`;
+  body += `Gold Sniper Trading System • EMA 9/21 Crossover • ${TFS.join(' / ')}\n`;
+  body += `Auto-generated daily report at 23:00 IST`;
 
-  // Send via Resend API
-  if (!RESEND_KEY) {
-    return new Response(JSON.stringify({ 
-      success: false, 
-      error: 'RESEND_API_KEY not set. Get a free key at https://resend.com',
-      alertCount: alerts.length,
-      entries: entries.length,
-      tps: tps.length,
-      sls: sls.length,
-      activeTrades: activeTrades.length
-    }), { headers: { 'Content-Type': 'application/json' } });
-  }
+  // Send via FormSubmit.co (free, no API key, no signup)
+  const formData = new URLSearchParams();
+  formData.append('subject', `🎯 Gold Sniper Daily Report — ${today} | ${entries.length} entries, ${tps.length} TPs, ${sls.length} SLs`);
+  formData.append('message', body);
 
-  const emailResp = await fetch('https://api.resend.com/emails', {
+  const emailResp = await fetch(`https://formsubmit.co/${TO_EMAIL}`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: 'Gold Sniper <onboarding@resend.dev>',
-      to: TO_EMAIL,
-      subject: `🎯 Gold Sniper Daily Report — ${today} | ${entries.length} entries, ${tps.length} TPs, ${sls.length} SLs`,
-      html
-    })
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formData.toString()
   });
 
-  const emailData = await emailResp.json();
+  const emailText = await emailResp.text();
+  const isConfirm = emailText.includes('confirm') || emailText.includes('Confirm') || emailText.includes('activation');
 
   return new Response(JSON.stringify({
     success: emailResp.ok,
     date: today,
-    sent: emailResp.ok,
-    emailId: emailData?.id || null,
-    error: emailResp.ok ? null : (emailData?.message || 'Unknown error'),
+    emailStatus: emailResp.status,
+    needsConfirmation: isConfirm,
+    message: isConfirm 
+      ? 'FormSubmit sent a confirmation email to shubhampawar3752@gmail.com — click the link in it to activate, then the daily emails will work automatically.'
+      : (emailResp.ok ? 'Email sent successfully!' : 'Failed to send'),
     stats: { entries: entries.length, tps: tps.length, sls: sls.length, fullCycles: dones.length, activeTrades: activeTrades.length }
   }), { headers: { 'Content-Type': 'application/json' } });
 });
