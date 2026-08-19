@@ -1428,6 +1428,21 @@ async function updateATRPanel() {
         </div>
         <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim)" id="backendTickTime">--:--:--</div>
       `;
+      // Add OHLC row below the panel
+      const ohlcRow = document.createElement('div');
+      ohlcRow.id = 'dailyOhlcRow';
+      ohlcRow.style.cssText = 'padding:4px 10px;margin:2px 0;border:1px solid var(--border-dim);border-radius:6px;background:rgba(0,255,255,0.02);display:flex;align-items:center;justify-content:space-between;gap:6px;font-family:Share Tech Mono,monospace;font-size:10px;';
+      ohlcRow.innerHTML = `
+        <span style="color:var(--text-dim)">O</span><span id="dayOpen" style="color:var(--neon-cyan)">—</span>
+        <span style="color:var(--text-dim)">H</span><span id="dayHigh" style="color:#39ff14">—</span>
+        <span style="color:var(--text-dim)">L</span><span id="dayLow" style="color:#ff3b3b">—</span>
+        <span style="color:var(--text-dim)">PC</span><span id="dayPrevClose" style="color:var(--neon-cyan)">—</span>
+        <span style="color:var(--text-dim)">src</span><span id="dayOhlcSrc" style="color:var(--text-dim);font-size:9px">—</span>
+      `;
+      const atrCards2 = document.getElementById('atrCards');
+      if (atrCards2 && atrCards2.parentNode) {
+        atrCards2.parentNode.insertBefore(ohlcRow, atrCards2);
+      }
       const atrCards = document.getElementById('atrCards');
       if (atrCards && atrCards.parentNode) {
         atrCards.parentNode.insertBefore(panel, atrCards);
@@ -1539,6 +1554,18 @@ async function pollBackendTicks() {
       // Update last update time
       const timeEl = document.getElementById('backendTickTime');
       if (timeEl) timeEl.textContent = data.timestamp || '';
+
+      // Update daily OHLC from backend
+      const setVal = (id, val, decimals=2) => {
+        const el = document.getElementById(id);
+        if (el && val && val > 0) el.textContent = '$' + val.toFixed(decimals);
+      };
+      setVal('dayOpen', data.dayOpen);
+      setVal('dayHigh', data.dayHigh);
+      setVal('dayLow', data.dayLow);
+      setVal('dayPrevClose', data.prevClose);
+      const srcEl = document.getElementById('dayOhlcSrc');
+      if (srcEl && data.prevCloseSource) srcEl.textContent = data.prevCloseSource;
     }
 
     // Sync active trades from backend into localStorage
