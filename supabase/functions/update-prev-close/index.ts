@@ -2,18 +2,16 @@ const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 
-// ── Previous close price logic ──
-// Gold trades nearly 24/5 (Sun 11pm – Fri 10:30pm IST, with a 1-hour daily break 10:30–11:00pm IST).
-// "Previous close" = the settlement price from the previous trading day.
+// ── Daily OHLC + Previous Close price logic ──
+// Fetches: previous close, open, high, low, close, change
+// Source priority:
+//   1. TradingView scanner -> open, high, low, close, change_abs (prevClose = close - change_abs)
+//   2. TwelveData quote API -> previous_close, open, high, low, close
+//   3. Alpha Vantage -> GLOBAL_QUOTE -> previous close, open, high, low
+//   4. livepriceofgold.com -> data-open (prevClose), HTML scrape for high/low
+//   5. DB fallback -> keep last known good values
 //
-// Source priority (most reliable first):
-//   1. TradingView scanner -> close - change_abs (computed prevClose)
-//   2. TwelveData quote API -> previous_close field
-//   3. Alpha Vantage -> GLOBAL_QUOTE -> 08. previous close
-//   4. livepriceofgold.com -> data-open attribute (today's open = yesterday's close)
-//   5. DB fallback -> keep last known good value (don't overwrite with 0)
-//
-// Smart: if already updated today, skip (prevent stale overwrite from repeated calls)
+// Smart: if already updated today, skip (prevent stale overwrite)
 
 const TV_SYMBOL = 'OANDA:XAUUSD';
 const TV_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Origin': 'https://www.tradingview.com' };
@@ -25,7 +23,8 @@ Deno.serve(async (req) => {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
   // Read current DB state first (for fallback)
-  let dbPrevClose = 0, dbPrevDate = '', dbId = 0, dbStates: any = {};
+  let dbId = 0, dbStates: any = {};
+  let dbPrevClose = 0, dbPrevDate = '';
   try {
     const stateResp = await fetch(`${SUPA_URL}/rest/v1/trading_states?limit=1`, {
       headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
@@ -39,47 +38,46 @@ Deno.serve(async (req) => {
     }
   } catch (e) { console.error('DB read failed:', (e as Error).message); }
 
-  // If already updated today, skip (prevent stale overwrite)
+  // If already updated today, skip
   if (dbPrevDate === today && dbPrevClose > 0) {
     return new Response(JSON.stringify({
       success: true,
-      prevClose: dbPrevClose,
-      source: dbStates?.__prevClose?.source || 'db',
-      updated: dbStates?.__prevClose?.updated || now,
+      ...dbStates.__prevClose,
       skipped: true,
       reason: 'Already updated today'
     }), { status: 200, headers });
   }
 
-  let prevClose = 0;
+  let prevClose = 0, open = 0, high = 0, low = 0, close = 0;
   let source = '';
 
-  // ── Source 1: TradingView scanner (close - change_abs = prevClose) ──
+  // ── Source 1: TradingView scanner ──
   if (prevClose === 0) {
     try {
-      const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(TV_SYMBOL)}&fields=close,change_abs,open`;
+      const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(TV_SYMBOL)}&fields=open,high,low,close,change_abs`;
       const r = await fetch(url, { headers: TV_HEADERS });
       if (r.ok) {
         const data = await r.json();
-        const close = parseFloat(data?.close);
+        const tvClose = parseFloat(data?.close);
+        const tvOpen = parseFloat(data?.open);
+        const tvHigh = parseFloat(data?.high);
+        const tvLow = parseFloat(data?.low);
         const changeAbs = parseFloat(data?.change_abs);
-        // Primary: close - change_abs (TradingView's actual prevClose)
-        if (!isNaN(close) && !isNaN(changeAbs) && close > 0 && changeAbs > 0) {
-          const pc = close - changeAbs;
-          if (pc > 0) {
-            prevClose = pc;
-            source = 'tradingview';
-            console.log(`TradingView prevClose: ${pc} (close=${close} - change_abs=${changeAbs})`);
-          }
+
+        if (!isNaN(tvClose) && !isNaN(changeAbs) && tvClose > 0 && changeAbs > 0) {
+          prevClose = tvClose - changeAbs;
         }
-        // Fallback: open price (today's open ~ yesterday's close)
-        if (prevClose === 0) {
-          const open = parseFloat(data?.open);
-          if (!isNaN(open) && open > 0) {
-            prevClose = open;
-            source = 'tradingview-open';
-            console.log(`TradingView open as prevClose: ${open}`);
-          }
+        if (!isNaN(tvOpen) && tvOpen > 0) open = tvOpen;
+        if (!isNaN(tvHigh) && tvHigh > 0) high = tvHigh;
+        if (!isNaN(tvLow) && tvLow > 0) low = tvLow;
+        if (!isNaN(tvClose) && tvClose > 0) close = tvClose;
+
+        // Fallback prevClose from open if change_abs missing
+        if (prevClose === 0 && open > 0) prevClose = open;
+
+        if (prevClose > 0) {
+          source = 'tradingview';
+          console.log(`TradingView: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
         }
       }
     } catch (e) { console.error('TradingView failed:', (e as Error).message); }
@@ -97,7 +95,11 @@ Deno.serve(async (req) => {
         if (!isNaN(pc) && pc > 0) {
           prevClose = pc;
           source = 'twelvedata';
-          console.log(`TwelveData prevClose: ${pc}`);
+          open = parseFloat(data?.open) || open;
+          high = parseFloat(data?.high) || high;
+          low = parseFloat(data?.low) || low;
+          close = parseFloat(data?.close) || close;
+          console.log(`TwelveData: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
         }
       }
     } catch (e) { console.error('TwelveData failed:', (e as Error).message); }
@@ -111,11 +113,16 @@ Deno.serve(async (req) => {
       });
       if (r.ok) {
         const data = await r.json();
-        const pc = parseFloat(data?.['Global Quote']?.['08. previous close']);
+        const gq = data?.['Global Quote'];
+        const pc = parseFloat(gq?.['08. previous close']);
         if (!isNaN(pc) && pc > 0) {
           prevClose = pc;
           source = 'alphavantage';
-          console.log(`Alpha Vantage prevClose: ${pc}`);
+          open = parseFloat(gq?.['02. open']) || open;
+          high = parseFloat(gq?.['03. high']) || high;
+          low = parseFloat(gq?.['04. low']) || low;
+          close = parseFloat(gq?.['05. price']) || close;
+          console.log(`Alpha Vantage: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
         }
       }
     } catch (e) { console.error('Alpha Vantage failed:', (e as Error).message); }
@@ -134,32 +141,50 @@ Deno.serve(async (req) => {
         if (m) {
           prevClose = parseFloat(m[1]);
           source = 'livepriceofgold';
-          console.log(`livepriceofgold prevClose: ${prevClose}`);
+          // Try to extract high/low from HTML
+          const hMatch = html.match(/data-high="([\d.]+)"/);
+          const lMatch = html.match(/data-low="([\d.]+)"/);
+          if (hMatch) high = parseFloat(hMatch[1]);
+          if (lMatch) low = parseFloat(lMatch[1]);
+          open = prevClose; // open ≈ prevClose for this source
+          console.log(`livepriceofgold: prevClose=${prevClose} high=${high} low=${low}`);
         }
       }
     } catch (e) { console.error('LPOG failed:', (e as Error).message); }
   }
 
-  // ── Source 5: DB fallback — keep last known good value ──
+  // ── Source 5: DB fallback ──
   if (prevClose === 0 && dbPrevClose > 0) {
     prevClose = dbPrevClose;
     source = 'db-fallback';
-    console.log(`All sources failed, using DB fallback: ${dbPrevClose}`);
+    open = dbStates?.__prevClose?.open || 0;
+    high = dbStates?.__prevClose?.high || 0;
+    low = dbStates?.__prevClose?.low || 0;
+    close = dbStates?.__prevClose?.close || 0;
+    console.log(`DB fallback: prevClose=${dbPrevClose}`);
   }
 
   if (prevClose === 0) {
     return new Response(JSON.stringify({
       success: false,
-      error: 'All sources failed and no DB fallback available',
-      dbPrevClose,
-      dbPrevDate
+      error: 'All sources failed and no DB fallback available'
     }), { status: 503, headers });
   }
 
-  // Store in trading_states
-  if (dbId > 0) {
-    dbStates.__prevClose = { value: prevClose, source, date: today, updated: now };
+  // Store everything in trading_states
+  const ohlcData = {
+    value: prevClose,
+    open: open || 0,
+    high: high || 0,
+    low: low || 0,
+    close: close || 0,
+    source,
+    date: today,
+    updated: now
+  };
 
+  if (dbId > 0) {
+    dbStates.__prevClose = ohlcData;
     await fetch(`${SUPA_URL}/rest/v1/trading_states?id=eq.${dbId}`, {
       method: 'PATCH',
       headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' },
@@ -169,10 +194,7 @@ Deno.serve(async (req) => {
 
   return new Response(JSON.stringify({
     success: true,
-    prevClose,
-    source,
-    date: today,
-    updated: now,
+    ...ohlcData,
     skipped: false
   }), { status: 200, headers });
 });

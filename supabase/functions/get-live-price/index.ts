@@ -201,7 +201,9 @@ Deno.serve(async (req) => {
   if (longCount > shortCount) overallSignal = 'bullish'; else if (shortCount > longCount) overallSignal = 'bearish';
 
   return new Response(JSON.stringify({
-    success: true, timestamp: now, price: live.price, prevClose: effectivePrevClose || live.prevClose, prevCloseSource: states?.__prevClose?.source || '', prevCloseDate: states?.__prevClose?.date || '', change: finalChange, changePct: finalChangePct,
+    success: true, timestamp: now, price: live.price, prevClose: effectivePrevClose || live.prevClose, prevCloseSource: states?.__prevClose?.source || '', prevCloseDate: states?.__prevClose?.date || '',
+    dayOpen: states?.__prevClose?.open || 0, dayHigh: states?.__prevClose?.high || 0, dayLow: states?.__prevClose?.low || 0, dayClose: states?.__prevClose?.close || 0,
+    change: finalChange, changePct: finalChangePct,
     marketState: 'open', marketTime: Math.floor(Date.now() / 1000), priceSource: live.source,
     fetchMs, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length,
     allTimeframes, overallSignal, longCount, shortCount, tradeHistory, stats,
