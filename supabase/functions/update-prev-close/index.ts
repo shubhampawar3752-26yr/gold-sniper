@@ -7,10 +7,10 @@ const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 // "Previous close" = the settlement price from the previous trading day.
 //
 // Source priority (most reliable first):
-//   1. TwelveData quote API -> previous_close field
-//   2. Alpha Vantage -> GLOBAL_QUOTE -> 08. previous close
-//   3. livepriceofgold.com -> data-open attribute (today's open = yesterday's close)
-//   4. TradingView scanner -> close - change_abs (computed prevClose)
+//   1. TradingView scanner -> close - change_abs (computed prevClose)
+//   2. TwelveData quote API -> previous_close field
+//   3. Alpha Vantage -> GLOBAL_QUOTE -> 08. previous close
+//   4. livepriceofgold.com -> data-open attribute (today's open = yesterday's close)
 //   5. DB fallback -> keep last known good value (don't overwrite with 0)
 //
 // Smart: if already updated today, skip (prevent stale overwrite from repeated calls)
@@ -54,62 +54,7 @@ Deno.serve(async (req) => {
   let prevClose = 0;
   let source = '';
 
-  // ── Source 1: TwelveData quote API ──
-  if (prevClose === 0) {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      if (r.ok) {
-        const data = await r.json();
-        const pc = parseFloat(data?.previous_close);
-        if (!isNaN(pc) && pc > 0) {
-          prevClose = pc;
-          source = 'twelvedata';
-          console.log(`TwelveData prevClose: ${pc}`);
-        }
-      }
-    } catch (e) { console.error('TwelveData failed:', (e as Error).message); }
-  }
-
-  // ── Source 2: Alpha Vantage ──
-  if (prevClose === 0) {
-    try {
-      const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GC=F&apikey=${Deno.env.get('ALPHA_VANTAGE_API_KEY')}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      if (r.ok) {
-        const data = await r.json();
-        const pc = parseFloat(data?.['Global Quote']?.['08. previous close']);
-        if (!isNaN(pc) && pc > 0) {
-          prevClose = pc;
-          source = 'alphavantage';
-          console.log(`Alpha Vantage prevClose: ${pc}`);
-        }
-      }
-    } catch (e) { console.error('Alpha Vantage failed:', (e as Error).message); }
-  }
-
-  // ── Source 3: livepriceofgold.com HTML scrape ──
-  if (prevClose === 0) {
-    try {
-      const r = await fetch('https://www.livepriceofgold.com/', {
-        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' }
-      });
-      if (r.ok) {
-        const html = await r.text();
-        let m = html.match(/data-open="([\d.]+)"/);
-        if (!m) m = html.match(/prev(?:ious)?\s*close[^\d]*(\d{3,5}\.\d+)/i);
-        if (m) {
-          prevClose = parseFloat(m[1]);
-          source = 'livepriceofgold';
-          console.log(`livepriceofgold prevClose: ${prevClose}`);
-        }
-      }
-    } catch (e) { console.error('LPOG failed:', (e as Error).message); }
-  }
-
-  // ── Source 4: TradingView scanner (close - change_abs = prevClose) ──
+  // ── Source 1: TradingView scanner (close - change_abs = prevClose) ──
   if (prevClose === 0) {
     try {
       const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(TV_SYMBOL)}&fields=close,change_abs,open`;
@@ -138,6 +83,61 @@ Deno.serve(async (req) => {
         }
       }
     } catch (e) { console.error('TradingView failed:', (e as Error).message); }
+  }
+
+  // ── Source 2: TwelveData quote API ──
+  if (prevClose === 0) {
+    try {
+      const r = await fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const pc = parseFloat(data?.previous_close);
+        if (!isNaN(pc) && pc > 0) {
+          prevClose = pc;
+          source = 'twelvedata';
+          console.log(`TwelveData prevClose: ${pc}`);
+        }
+      }
+    } catch (e) { console.error('TwelveData failed:', (e as Error).message); }
+  }
+
+  // ── Source 3: Alpha Vantage ──
+  if (prevClose === 0) {
+    try {
+      const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GC=F&apikey=${Deno.env.get('ALPHA_VANTAGE_API_KEY')}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      if (r.ok) {
+        const data = await r.json();
+        const pc = parseFloat(data?.['Global Quote']?.['08. previous close']);
+        if (!isNaN(pc) && pc > 0) {
+          prevClose = pc;
+          source = 'alphavantage';
+          console.log(`Alpha Vantage prevClose: ${pc}`);
+        }
+      }
+    } catch (e) { console.error('Alpha Vantage failed:', (e as Error).message); }
+  }
+
+  // ── Source 4: livepriceofgold.com HTML scrape ──
+  if (prevClose === 0) {
+    try {
+      const r = await fetch('https://www.livepriceofgold.com/', {
+        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html' }
+      });
+      if (r.ok) {
+        const html = await r.text();
+        let m = html.match(/data-open="([\d.]+)"/);
+        if (!m) m = html.match(/prev(?:ious)?\s*close[^\d]*(\d{3,5}\.\d+)/i);
+        if (m) {
+          prevClose = parseFloat(m[1]);
+          source = 'livepriceofgold';
+          console.log(`livepriceofgold prevClose: ${prevClose}`);
+        }
+      }
+    } catch (e) { console.error('LPOG failed:', (e as Error).message); }
   }
 
   // ── Source 5: DB fallback — keep last known good value ──
