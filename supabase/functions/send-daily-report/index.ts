@@ -3,7 +3,7 @@
 // Morning report at 09:00 IST — overnight activity + pre-market status
 // Email: Resend API → shubhampawar3752@gmail.com
 // WhatsApp: Meta WhatsApp Cloud API → recipients
-// Report is timeframe-wise with entry/SL/TP hit times + win rate per TF
+// Report is timeframe-wise with entry/SL/TP hit times + entry price + win rate per TF
 
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -46,6 +46,53 @@ Deno.serve(async (req) => {
   const states: any[] = await r2.json();
   const state = states[0]?.states || {};
 
+  // ── Build cycle→entry map per TF (from entry alerts + trading state) ──
+  // This lets us show entry price on TP/SL/done rows even if the alert itself doesn't have it
+  const cycleEntryMap: Record<string, Record<number, number>> = {}; // tf → cycle → entryPrice
+  const cycleDirMap: Record<string, Record<number, string>> = {};   // tf → cycle → direction
+  const cycleSLMap: Record<string, Record<number, number>> = {};     // tf → cycle → SL
+
+  for (const tf of TFS) {
+    cycleEntryMap[tf] = {};
+    cycleDirMap[tf] = {};
+    cycleSLMap[tf] = {};
+    // From entry alerts
+    const tfEntries = alerts.filter(a => a.timeframe === tf && a.type === 'entry');
+    for (const a of tfEntries) {
+      if (a.entry && a.cycle) {
+        cycleEntryMap[tf][a.cycle] = Number(a.entry);
+        cycleDirMap[tf][a.cycle] = a.direction || '';
+        cycleSLMap[tf][a.cycle] = Number(a.sl) || 0;
+      }
+    }
+    // From trading state (for active cycles that may not have an entry alert today)
+    const s = state[tf];
+    if (s && s.entry && s.cycle) {
+      if (!cycleEntryMap[tf][s.cycle]) {
+        cycleEntryMap[tf][s.cycle] = Number(s.entry);
+        cycleDirMap[tf][s.cycle] = s.dir || '';
+        cycleSLMap[tf][s.cycle] = Number(s.sl) || 0;
+      }
+    }
+  }
+
+  // Helper: get entry price for any alert
+  function getEntry(tf: string, alert: any): number | null {
+    if (alert.entry) return Number(alert.entry);
+    const cycle = alert.cycle;
+    if (cycle && cycleEntryMap[tf][cycle]) return cycleEntryMap[tf][cycle];
+    return null;
+  }
+  function getDir(tf: string, alert: any): string {
+    return alert.direction || alert.dir || (alert.cycle ? cycleDirMap[tf][alert.cycle] || '' : '');
+  }
+  function getSL(tf: string, alert: any): number | null {
+    if (alert.sl) return Number(alert.sl);
+    const cycle = alert.cycle;
+    if (cycle && cycleSLMap[tf][cycle]) return cycleSLMap[tf][cycle];
+    return null;
+  }
+
   // ── Group alerts by timeframe ──
   const tfData: Record<string, {
     entries: any[], tps: any[], sls: any[], dones: any[],
@@ -59,7 +106,6 @@ Deno.serve(async (req) => {
     const sls = tfAlerts.filter(a => a.type === 'sl');
     const dones = tfAlerts.filter(a => a.type === 'alldone');
     
-    // Win rate: cycles that hit at least 1 TP vs cycles that hit SL
     const cyclesWithTP = new Set(tps.map(a => a.cycle)).size;
     const cyclesWithSL = sls.length;
     const totalCycles = entries.length;
@@ -109,13 +155,13 @@ Deno.serve(async (req) => {
   .footer{text-align:center;color:#555;font-size:11px;margin-top:20px}
   </style></head><body>`;
 
-  // Overall summary
   const totalEntries = Object.values(tfData).reduce((s, d) => s + d.entries.length, 0);
   const totalTPs = Object.values(tfData).reduce((s, d) => s + d.tps.length, 0);
   const totalSLs = Object.values(tfData).reduce((s, d) => s + d.sls.length, 0);
   const totalDones = Object.values(tfData).reduce((s, d) => s + d.dones.length, 0);
   const totalWins = Object.values(tfData).reduce((s, d) => s + d.wins, 0);
-  const overallWR = totalEntries > 0 ? Math.round((totalWins / totalEntries) * 100) : 0;
+  const totalLosses = Object.values(tfData).reduce((s, d) => s + d.losses, 0);
+  const overallWR = (totalWins + totalLosses) > 0 ? Math.round((totalWins / (totalWins + totalLosses)) * 100) : 0;
 
   html += `<div class="header"><h1>GOLD SNIPER — ${title}</h1><div class="date">${now} (IST) • ${period}</div></div>`;
   html += `<div class="stats">
@@ -138,7 +184,6 @@ Deno.serve(async (req) => {
     html += `<div class="tf-header"><span class="tf-name">${tf}</span><span class="tf-winrate ${wrClass}">${d.winRate}% WR</span></div>`;
     html += `<div class="tf-stats">Cycles: ${d.cycles} | Wins: ${d.wins} | Losses: ${d.losses} | TPs: ${d.tps.length} | Full Cycles: ${d.dones.length}</div>`;
 
-    // Chronological events table for this TF
     // Merge all events and sort by time
     const allEvents: {time: string, type: string, data: any}[] = [];
     d.entries.forEach(a => allEvents.push({ time: String(a.created_at).substring(11, 19), type: 'entry', data: a }));
@@ -157,18 +202,22 @@ Deno.serve(async (req) => {
       else if (ev.type === 'sl') { icon = '🛑 SL HIT'; eventClass = 'red'; }
       else { icon = '🎉 FULL CYCLE'; eventClass = 'gold'; }
       
-      const dir = a.direction || a.dir || '';
+      const dir = getDir(tf, a);
       const dirClass = (dir === 'buy' || dir === 'long') ? 'green' : (dir === 'sell' || dir === 'short') ? 'red' : '';
       const dirText = dir ? dir.toUpperCase() : '-';
+      
+      // Use helper to get entry price from alert or lookup by cycle
+      const entryPrice = getEntry(tf, a);
+      const slPrice = getSL(tf, a);
       
       html += `<tr class="event-row">
         <td class="time-col">${ev.time}</td>
         <td class="${eventClass}"><b>${icon}</b></td>
         <td class="${dirClass}">${dirText}</td>
-        <td>${a.entry ? '$' + Number(a.entry).toFixed(2) : '-'}</td>
-        <td>${a.sl ? '$' + Number(a.sl).toFixed(2) : '-'}</td>
+        <td>${entryPrice ? '$' + entryPrice.toFixed(2) : '-'}</td>
+        <td>${slPrice ? '$' + slPrice.toFixed(2) : '-'}</td>
         <td>${a.tp_num || a.tpNum || '-'}</td>
-        <td>${a.tp_price || a.tpPrice ? '$' + Number(a.tp_price || a.tpPrice).toFixed(2) : '-'}</td>
+        <td>${(a.tp_price || a.tpPrice) ? '$' + Number(a.tp_price || a.tpPrice).toFixed(2) : '-'}</td>
         <td>${a.price ? '$' + Number(a.price).toFixed(2) : '-'}</td>
         <td>#${a.cycle || '-'}</td>
       </tr>`;
@@ -219,31 +268,36 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── WhatsApp summary (timeframe-wise) ──
+  // ── WhatsApp summary (timeframe-wise with entry prices) ──
   let waMsg = `*GOLD SNIPER — ${mode === 'morning' ? '☀️ MORNING' : '🎯 DAILY'} REPORT*\n${now} (IST)\n\n`;
   waMsg += `📊 *OVERALL: ${totalEntries} entries | ${totalTPs} TPs | ${totalSLs} SLs | WR ${overallWR}%*\n\n`;
 
   for (const tf of TFS) {
     const d = tfData[tf];
     if (d.entries.length === 0 && d.tps.length === 0 && d.sls.length === 0) continue;
-    waMsg += `*${tf}* — WR ${d.winRate}% | ${d.cycles} cycles | ${d.wins}W ${d.losses}L\n`;
+    waMsg += `*${tf}* — WR ${d.winRate}% | ${d.wins}W ${d.losses}L\n`;
     
     for (const a of d.entries) {
       const t = String(a.created_at).substring(11, 19);
-      const dir = (a.direction || '').toUpperCase();
-      waMsg += `  🟢 ${t} ENTRY ${dir} $${Number(a.entry||0).toFixed(2)} SL $${Number(a.sl||0).toFixed(2)} #${a.cycle}\n`;
+      const dir = getDir(tf, a).toUpperCase();
+      const entry = getEntry(tf, a);
+      const sl = getSL(tf, a);
+      waMsg += `  🟢 ${t} ENTRY ${dir} $${entry?.toFixed(2) || '?'} SL $${sl?.toFixed(2) || '?'} #${a.cycle}\n`;
     }
     for (const a of d.tps) {
       const t = String(a.created_at).substring(11, 19);
-      waMsg += `  ✅ ${t} TP${a.tp_num||'?'} $${Number(a.tp_price||0).toFixed(2)} #${a.cycle}\n`;
+      const entry = getEntry(tf, a);
+      waMsg += `  ✅ ${t} TP${a.tp_num||'?'} $${Number(a.tp_price||0).toFixed(2)} (entry $${entry?.toFixed(2) || '?'}) #${a.cycle}\n`;
     }
     for (const a of d.sls) {
       const t = String(a.created_at).substring(11, 19);
-      waMsg += `  🛑 ${t} SL HIT $${Number(a.price||0).toFixed(2)} #${a.cycle}\n`;
+      const entry = getEntry(tf, a);
+      waMsg += `  🛑 ${t} SL HIT $${Number(a.price||0).toFixed(2)} (entry $${entry?.toFixed(2) || '?'}) #${a.cycle}\n`;
     }
     for (const a of d.dones) {
       const t = String(a.created_at).substring(11, 19);
-      waMsg += `  🎉 ${t} FULL CYCLE #${a.cycle}\n`;
+      const entry = getEntry(tf, a);
+      waMsg += `  🎉 ${t} FULL CYCLE (entry $${entry?.toFixed(2) || '?'}) #${a.cycle}\n`;
     }
     waMsg += `\n`;
   }
@@ -285,11 +339,6 @@ Deno.serve(async (req) => {
     email: emailResult,
     whatsapp: waResults,
     overallWinRate: overallWR,
-    tfSummary: Object.fromEntries(TFS.map(tf => [tf, { 
-      winRate: tfData[tf].winRate, cycles: tfData[tf].cycles, 
-      wins: tfData[tf].wins, losses: tfData[tf].losses,
-      tps: tfData[tf].tps.length, sls: tfData[tf].sls.length
-    }])),
     stats: { entries: totalEntries, tps: totalTPs, sls: totalSLs, fullCycles: totalDones, activeTrades: activeTrades.length }
   }), { headers: { 'Content-Type': 'application/json' } });
 });
