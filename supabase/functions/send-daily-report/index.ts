@@ -281,7 +281,103 @@ Deno.serve(async (req) => {
         <td>#${a.cycle || '-'}</td>
       </tr>`;
     }
-    html += `</table></div>`;
+    html += `</table>`;
+    
+    // ── Trade Summary by Cycle for this TF ──
+    // Group entries by cycle and show: Entry, SL, TP1-TP5 hit status with prices
+    const cycles = new Map<number, { entry: number | null, dir: string, sl: number | null, tps: Map<number, { price: number, hit: boolean, hitTime: string }>, slHit: boolean, allDone: boolean } }>();
+    
+    // Build cycle data from entries
+    for (const a of d.entries) {
+      const c = a.cycle || 0;
+      if (!cycles.has(c)) cycles.set(c, { entry: null, dir: '', sl: null, tps: new Map(), slHit: false, allDone: false });
+      const cy = cycles.get(c)!;
+      cy.entry = a.entry ? Number(a.entry) : null;
+      cy.dir = a.direction || '';
+      cy.sl = a.sl ? Number(a.sl) : null;
+    }
+    // Add TPs from tp alerts (use time-based lookup for entry/direction if needed)
+    for (const a of d.tps) {
+      const c = a.cycle || (getEntry(tf, a) ? findEntryByTime(tf, a.created_at)?.cycle : 0) || 0;
+      if (!cycles.has(c)) cycles.set(c, { entry: null, dir: '', sl: null, tps: new Map(), slHit: false, allDone: false });
+      const cy = cycles.get(c)!;
+      if (!cy.entry) cy.entry = getEntry(tf, a);
+      if (!cy.dir) cy.dir = getDir(tf, a);
+      if (!cy.sl) cy.sl = getSL(tf, a);
+      const tpN = a.tp_num || a.tpNum || 0;
+      cy.tps.set(tpN, { price: Number(a.tp_price || a.tpPrice || 0), hit: true, hitTime: String(a.created_at).substring(11, 19) });
+    }
+    // Mark SL hits
+    for (const a of d.sls) {
+      const c = a.cycle || 0;
+      if (!cycles.has(c)) cycles.set(c, { entry: null, dir: '', sl: null, tps: new Map(), slHit: false, allDone: false });
+      const cy = cycles.get(c)!;
+      cy.slHit = true;
+      if (!cy.entry) cy.entry = getEntry(tf, a);
+      if (!cy.dir) cy.dir = getDir(tf, a);
+      if (!cy.sl) cy.sl = getSL(tf, a);
+    }
+    // Mark full cycles
+    for (const a of d.dones) {
+      const c = a.cycle || 0;
+      if (cycles.has(c)) cycles.get(c)!.allDone = true;
+    }
+    
+    if (cycles.size > 0) {
+      html += `<table style="margin-top:10px"><tr><th>#</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1 Hit</th><th>TP2 Hit</th><th>TP3 Hit</th><th>TP4 Hit</th><th>TP5 Hit</th><th>Status</th></tr>`;
+      const sortedCycles = Array.from(cycles.entries()).sort((a, b) => b[0] - a[0]);
+      for (const [cNum, cy] of sortedCycles) {
+        const dirClass = (cy.dir === 'buy' || cy.dir === 'long') ? 'green' : (cy.dir === 'sell' || cy.dir === 'short') ? 'red' : '';
+        const dirText = cy.dir ? cy.dir.toUpperCase() : '-';
+        
+        // Get TP prices from entry alert or trading state
+        const s = state[tf];
+        let tpPrices: number[] = [];
+        if (cy.entry && s && s.entry && Math.abs(s.entry - cy.entry) < 0.5) {
+          tpPrices = [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5].filter(Boolean);
+        }
+        // Also check entry alert's tp field
+        const entryAlert = d.entries.find(a => (a.cycle || 0) === cNum);
+        if (entryAlert?.tp) {
+          tpPrices = [entryAlert.tp.tp1, entryAlert.tp.tp2, entryAlert.tp.tp3, entryAlert.tp.tp4, entryAlert.tp.tp5].filter(Boolean);
+        }
+        
+        // Build TP columns
+        let tpCols = '';
+        for (let i = 1; i <= 5; i++) {
+          const tp = cy.tps.get(i);
+          const tpPrice = tp ? tp.price : (tpPrices[i-1] || 0);
+          if (tp) {
+            tpCols += `<td class="green">✅ $${tpPrice.toFixed(2)}</td>`;
+          } else if (tpPrice) {
+            tpCols += `<td style="color:#555">⬜ $${tpPrice.toFixed(2)}</td>`;
+          } else {
+            tpCols += `<td style="color:#444">-</td>`;
+          }
+        }
+        
+        // Status
+        let status, statusClass;
+        if (cy.allDone) { status = '🎉 FULL CYCLE'; statusClass = 'gold'; }
+        else if (cy.slHit) { status = '🛑 SL HIT'; statusClass = 'red'; }
+        else {
+          const hitCount = cy.tps.size;
+          status = `🟢 Active ${hitCount}/5 TPs`; statusClass = 'green';
+        }
+        
+        html += `<tr class="event-row">
+          <td>#${cNum}</td>
+          <td class="${dirClass}">${dirText}</td>
+          <td>${cy.entry ? '$' + cy.entry.toFixed(2) : '-'}</td>
+          <td>${cy.sl ? '$' + cy.sl.toFixed(2) : '-'}</td>
+          ${tpCols}
+          <td class="${statusClass}"><b>${status}</b></td>
+        </tr>`;
+      }
+      html += `</table>`;
+    }
+    
+    html += `</div>`;
   }
 
   // Active trades
