@@ -55,30 +55,37 @@ Deno.serve(async (req) => {
   const states: any[] = await r2.json();
   const state = states[0]?.states || {};
 
-  // Fetch ALL entry alerts for cycle→entry lookup
+  // Fetch ALL entry alerts (for time-based entry price lookup)
+  // TP/SL alerts don't carry entry/direction/cycle fields, so we match by
+  // finding the most recent entry alert for the same timeframe before the alert's timestamp
   const rEntries = await fetch(
-    `${SUPA_URL}/rest/v1/alerts?type=eq.entry&order=created_at.desc&limit=1000`,
+    `${SUPA_URL}/rest/v1/alerts?type=eq.entry&order=created_at.asc&limit=2000`,
     { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
   );
   const allEntryAlerts: any[] = await rEntries.json();
 
-  // Build cycle→entry maps
+  // Build per-TF sorted entry list for time-based lookup
+  const tfEntries: Record<string, any[]> = {};
+  for (const tf of TFS) {
+    tfEntries[tf] = allEntryAlerts.filter(a => a.timeframe === tf);
+  }
+
+  // For each TF, also build cycle→entry map from entry alerts that DO have cycle
   const cycleEntryMap: Record<string, Record<number, number>> = {};
   const cycleDirMap: Record<string, Record<number, string>> = {};
   const cycleSLMap: Record<string, Record<number, number>> = {};
-
   for (const tf of TFS) {
     cycleEntryMap[tf] = {};
     cycleDirMap[tf] = {};
     cycleSLMap[tf] = {};
-    const tfEntries = allEntryAlerts.filter(a => a.timeframe === tf);
-    for (const a of tfEntries) {
+    for (const a of tfEntries[tf]) {
       if (a.entry && a.cycle != null && cycleEntryMap[tf][a.cycle] === undefined) {
         cycleEntryMap[tf][a.cycle] = Number(a.entry);
         cycleDirMap[tf][a.cycle] = a.direction || '';
         cycleSLMap[tf][a.cycle] = Number(a.sl) || 0;
       }
     }
+    // From trading state for active cycle
     const s = state[tf];
     if (s && s.entry && s.cycle != null && cycleEntryMap[tf][s.cycle] === undefined) {
       cycleEntryMap[tf][s.cycle] = Number(s.entry);
@@ -87,17 +94,87 @@ Deno.serve(async (req) => {
     }
   }
 
-  function getEntry(tf: string, a: any): number | null {
-    if (a.entry) return Number(a.entry);
-    if (a.cycle != null && cycleEntryMap[tf][a.cycle]) return cycleEntryMap[tf][a.cycle];
+  // Find the most recent entry for a TF that occurred at or before the given timestamp
+  function findEntryByTime(tf: string, timestamp: string): any | null {
+    const entries = tfEntries[tf];
+    if (!entries || entries.length === 0) return null;
+    // entries are sorted ascending by created_at
+    // Find the last entry whose created_at <= timestamp
+    let result = null;
+    for (const e of entries) {
+      if (e.created_at <= timestamp) result = e;
+      else break;
+    }
+    return result;
+  }
+
+  // Also check trading state: if the alert's timeframe has an active trade with matching TP levels,
+  // use the trading state's entry price
+  function getEntryFromState(tf: string, alert: any): number | null {
+    const s = state[tf];
+    if (!s || !s.entry || s.entry === 0) return null;
+    // If TP alert, check if tp_price matches one of the state's TP levels
+    if (alert.tp_price) {
+      const tpPrice = Number(alert.tp_price);
+      const stateTPs = [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5].filter(Boolean);
+      for (const stp of stateTPs) {
+        if (Math.abs(stp - tpPrice) < 0.5) return Number(s.entry);
+      }
+    }
+    // If SL alert, check if price is near the SL level
+    if (alert.type === 'sl' && alert.price && s.sl) {
+      if (Math.abs(Number(alert.price) - Number(s.sl)) < 1) return Number(s.entry);
+    }
     return null;
   }
-  function getDir(tf: string, a: any): string {
-    return a.direction || a.dir || (a.cycle != null ? cycleDirMap[tf][a.cycle] || '' : '');
+
+  function getEntry(tf: string, alert: any): number | null {
+    // 1. Direct field on alert
+    if (alert.entry) return Number(alert.entry);
+    // 2. Cycle-based lookup (if alert has cycle)
+    if (alert.cycle != null && cycleEntryMap[tf][alert.cycle]) return cycleEntryMap[tf][alert.cycle];
+    // 3. Time-based lookup: find most recent entry for this TF before this alert
+    const ts = alert.created_at;
+    if (ts) {
+      const matched = findEntryByTime(tf, ts);
+      if (matched && matched.entry) return Number(matched.entry);
+    }
+    // 4. Trading state matching (TP price or SL price matches current state)
+    const fromState = getEntryFromState(tf, alert);
+    if (fromState) return fromState;
+    // 5. Fallback: just use current trading state entry for this TF
+    const s = state[tf];
+    if (s && s.entry) return Number(s.entry);
+    return null;
   }
-  function getSL(tf: string, a: any): number | null {
-    if (a.sl) return Number(a.sl);
-    if (a.cycle != null && cycleSLMap[tf][a.cycle]) return cycleSLMap[tf][a.cycle];
+
+  function getDir(tf: string, alert: any): string {
+    if (alert.direction || alert.dir) return alert.direction || alert.dir;
+    if (alert.cycle != null && cycleDirMap[tf][alert.cycle]) return cycleDirMap[tf][alert.cycle];
+    // Time-based lookup
+    const ts = alert.created_at;
+    if (ts) {
+      const matched = findEntryByTime(tf, ts);
+      if (matched && matched.direction) return matched.direction;
+    }
+    // Trading state
+    const s = state[tf];
+    if (s && s.dir) return s.dir;
+    return '';
+  }
+
+  function getSL(tf: string, alert: any): number | null {
+    if (alert.sl) return Number(alert.sl);
+    if (alert.cycle != null && cycleSLMap[tf][alert.cycle]) return cycleSLMap[tf][alert.cycle];
+    // Time-based lookup
+    const ts = alert.created_at;
+    if (ts) {
+      const matched = findEntryByTime(tf, ts);
+      if (matched && matched.sl) return Number(matched.sl);
+    }
+    // Trading state
+    const s = state[tf];
+    if (s && s.sl) return Number(s.sl);
     return null;
   }
 
