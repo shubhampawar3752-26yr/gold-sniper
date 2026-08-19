@@ -1,8 +1,7 @@
-// ── Gold Sniper: Daily Trade Report — PDF Email + WhatsApp ──
-// Generates a styled PDF report, sends as email attachment via Resend
-// Also sends WhatsApp summary via Meta API
-
-import { PDFDocument, StandardFonts, rgb } from 'npm:pdf-lib@1.17.1';
+// ── Gold Sniper: Daily Trade Report — HTML Email + WhatsApp ──
+// Timeframe-wise report with entry/SL/TP hit times + entry price + win rate per TF
+// Email: Resend API (styled HTML) → shubhampawar3752@gmail.com
+// WhatsApp: Meta WhatsApp Cloud API → recipients
 
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -13,16 +12,6 @@ const META_PHONE_ID = Deno.env.get('META_WHATSAPP_PHONE_ID') || '';
 const RECIPIENTS = (Deno.env.get('WHATSAPP_RECIPIENTS') || '').split(',').map(s => s.trim()).filter(Boolean);
 
 const TFS = ['1M', '5M', '15M', '30M', '1H', '4H'];
-
-// Colors
-const GOLD = rgb(0.85, 0.65, 0.0);
-const GREEN = rgb(0.0, 0.7, 0.3);
-const RED = rgb(0.8, 0.2, 0.2);
-const WHITE = rgb(0.9, 0.9, 0.9);
-const GRAY = rgb(0.5, 0.5, 0.5);
-const DARK = rgb(0.08, 0.08, 0.12);
-const MID = rgb(0.15, 0.15, 0.2);
-const LIGHT = rgb(0.25, 0.25, 0.3);
 
 Deno.serve(async (req) => {
   const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
@@ -55,22 +44,21 @@ Deno.serve(async (req) => {
   const states: any[] = await r2.json();
   const state = states[0]?.states || {};
 
-  // Fetch ALL entry alerts (for time-based entry price lookup)
-  // TP/SL alerts don't carry entry/direction/cycle fields, so we match by
-  // finding the most recent entry alert for the same timeframe before the alert's timestamp
+  // Fetch ALL entry alerts for time-based entry price lookup
+  // TP/SL alerts don't carry entry/direction/cycle fields, so we match by timeframe + time
   const rEntries = await fetch(
     `${SUPA_URL}/rest/v1/alerts?type=eq.entry&order=created_at.asc&limit=2000`,
     { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
   );
   const allEntryAlerts: any[] = await rEntries.json();
 
-  // Build per-TF sorted entry list for time-based lookup
+  // Per-TF sorted entry list for time-based lookup
   const tfEntries: Record<string, any[]> = {};
   for (const tf of TFS) {
     tfEntries[tf] = allEntryAlerts.filter(a => a.timeframe === tf);
   }
 
-  // For each TF, also build cycle→entry map from entry alerts that DO have cycle
+  // Cycle→entry maps (for alerts that DO have cycle)
   const cycleEntryMap: Record<string, Record<number, number>> = {};
   const cycleDirMap: Record<string, Record<number, string>> = {};
   const cycleSLMap: Record<string, Record<number, number>> = {};
@@ -85,7 +73,6 @@ Deno.serve(async (req) => {
         cycleSLMap[tf][a.cycle] = Number(a.sl) || 0;
       }
     }
-    // From trading state for active cycle
     const s = state[tf];
     if (s && s.entry && s.cycle != null && cycleEntryMap[tf][s.cycle] === undefined) {
       cycleEntryMap[tf][s.cycle] = Number(s.entry);
@@ -94,12 +81,10 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Find the most recent entry for a TF that occurred at or before the given timestamp
+  // Find most recent entry for a TF at or before timestamp
   function findEntryByTime(tf: string, timestamp: string): any | null {
     const entries = tfEntries[tf];
     if (!entries || entries.length === 0) return null;
-    // entries are sorted ascending by created_at
-    // Find the last entry whose created_at <= timestamp
     let result = null;
     for (const e of entries) {
       if (e.created_at <= timestamp) result = e;
@@ -108,12 +93,10 @@ Deno.serve(async (req) => {
     return result;
   }
 
-  // Also check trading state: if the alert's timeframe has an active trade with matching TP levels,
-  // use the trading state's entry price
+  // Match TP/SL to trading state by TP price or SL price
   function getEntryFromState(tf: string, alert: any): number | null {
     const s = state[tf];
     if (!s || !s.entry || s.entry === 0) return null;
-    // If TP alert, check if tp_price matches one of the state's TP levels
     if (alert.tp_price) {
       const tpPrice = Number(alert.tp_price);
       const stateTPs = [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5].filter(Boolean);
@@ -121,7 +104,6 @@ Deno.serve(async (req) => {
         if (Math.abs(stp - tpPrice) < 0.5) return Number(s.entry);
       }
     }
-    // If SL alert, check if price is near the SL level
     if (alert.type === 'sl' && alert.price && s.sl) {
       if (Math.abs(Number(alert.price) - Number(s.sl)) < 1) return Number(s.entry);
     }
@@ -129,20 +111,14 @@ Deno.serve(async (req) => {
   }
 
   function getEntry(tf: string, alert: any): number | null {
-    // 1. Direct field on alert
     if (alert.entry) return Number(alert.entry);
-    // 2. Cycle-based lookup (if alert has cycle)
     if (alert.cycle != null && cycleEntryMap[tf][alert.cycle]) return cycleEntryMap[tf][alert.cycle];
-    // 3. Time-based lookup: find most recent entry for this TF before this alert
-    const ts = alert.created_at;
-    if (ts) {
-      const matched = findEntryByTime(tf, ts);
+    if (alert.created_at) {
+      const matched = findEntryByTime(tf, alert.created_at);
       if (matched && matched.entry) return Number(matched.entry);
     }
-    // 4. Trading state matching (TP price or SL price matches current state)
     const fromState = getEntryFromState(tf, alert);
     if (fromState) return fromState;
-    // 5. Fallback: just use current trading state entry for this TF
     const s = state[tf];
     if (s && s.entry) return Number(s.entry);
     return null;
@@ -151,13 +127,10 @@ Deno.serve(async (req) => {
   function getDir(tf: string, alert: any): string {
     if (alert.direction || alert.dir) return alert.direction || alert.dir;
     if (alert.cycle != null && cycleDirMap[tf][alert.cycle]) return cycleDirMap[tf][alert.cycle];
-    // Time-based lookup
-    const ts = alert.created_at;
-    if (ts) {
-      const matched = findEntryByTime(tf, ts);
+    if (alert.created_at) {
+      const matched = findEntryByTime(tf, alert.created_at);
       if (matched && matched.direction) return matched.direction;
     }
-    // Trading state
     const s = state[tf];
     if (s && s.dir) return s.dir;
     return '';
@@ -166,13 +139,10 @@ Deno.serve(async (req) => {
   function getSL(tf: string, alert: any): number | null {
     if (alert.sl) return Number(alert.sl);
     if (alert.cycle != null && cycleSLMap[tf][alert.cycle]) return cycleSLMap[tf][alert.cycle];
-    // Time-based lookup
-    const ts = alert.created_at;
-    if (ts) {
-      const matched = findEntryByTime(tf, ts);
+    if (alert.created_at) {
+      const matched = findEntryByTime(tf, alert.created_at);
       if (matched && matched.sl) return Number(matched.sl);
     }
-    // Trading state
     const s = state[tf];
     if (s && s.sl) return Number(s.sl);
     return null;
@@ -186,7 +156,7 @@ Deno.serve(async (req) => {
     const tps = tfAlerts.filter(a => a.type === 'tp');
     const sls = tfAlerts.filter(a => a.type === 'sl');
     const dones = tfAlerts.filter(a => a.type === 'alldone');
-    const wins = new Set(tps.map(a => a.cycle)).size;
+    const wins = new Set(tps.map(a => a.cycle).filter(Boolean)).size;
     const losses = sls.length;
     const winRate = (wins + losses) > 0 ? Math.round((wins / (wins + losses)) * 100) : 0;
     tfData[tf] = { entries, tps, sls, dones, wins, losses, winRate, cycles: entries.length };
@@ -209,81 +179,55 @@ Deno.serve(async (req) => {
   const totalLosses = Object.values(tfData).reduce((s: number, d: any) => s + d.losses, 0);
   const overallWR = (totalWins + totalLosses) > 0 ? Math.round((totalWins / (totalWins + totalLosses)) * 100) : 0;
 
-  // ════════════════════════════════════════
-  // Generate PDF
-  // ════════════════════════════════════════
-  const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const fontMono = await pdfDoc.embedFont(StandardFonts.Courier);
-  
-  const PAGE_W = 595; // A4 width in points
-  const PAGE_H = 842; // A4 height
-  const MARGIN = 40;
-  const contentW = PAGE_W - MARGIN * 2;
-  
-  let page = pdfDoc.addPage([PAGE_W, PAGE_H]);
-  let y = PAGE_H - MARGIN;
+  // ── Build HTML Email ──
+  const title = mode === 'morning' ? '☀️ Morning Report' : '🎯 Daily Report';
+  const period = mode === 'morning' ? 'Overnight (last 12h)' : "Today's Full History";
 
-  function newPage() {
-    page = pdfDoc.addPage([PAGE_W, PAGE_H]);
-    y = PAGE_H - MARGIN;
-  }
+  let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+  body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a0f;color:#e0e0e0;margin:0;padding:20px}
+  .header{text-align:center;padding:24px;background:linear-gradient(135deg,#1a1a25,#12121a);border-radius:12px;border:1px solid #333;margin-bottom:20px}
+  .header h1{color:#FFD700;margin:0;font-size:24px;letter-spacing:2px}
+  .header .date{color:#888;font-size:14px;margin-top:8px}
+  .stats{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+  .stat{flex:1;min-width:100px;text-align:center;padding:14px 8px;background:#12121a;border:1px solid #333;border-radius:8px}
+  .stat .num{font-size:28px;font-weight:bold}.stat .label{font-size:11px;color:#888}
+  .tf-section{background:#1a1a25;border:1px solid #333;border-radius:10px;padding:16px;margin-bottom:16px}
+  .tf-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #333}
+  .tf-name{color:#FFD700;font-size:18px;font-weight:bold}
+  .tf-winrate{font-size:14px;padding:4px 12px;border-radius:6px;font-weight:bold}
+  .wr-good{background:#0a3a1a;color:#00e676}
+  .wr-bad{background:#3a0a0a;color:#ff4444}
+  .wr-neutral{background:#2a2a1a;color:#FFD700}
+  .tf-stats{font-size:12px;color:#888;margin-bottom:10px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:#888;padding:6px;border-bottom:1px solid #333}
+  td{padding:6px;border-bottom:1px solid #222}
+  .green{color:#00e676}.red{color:#ff4444}.gold{color:#FFD700}
+  .event-row td{font-size:12px}
+  .time-col{color:#aaa;font-family:monospace;white-space:nowrap}
+  .footer{text-align:center;color:#555;font-size:11px;margin-top:20px}
+  </style></head><body>`;
 
-  function ensureSpace(h: number) {
-    if (y - h < MARGIN) newPage();
-  }
+  html += `<div class="header"><h1>GOLD SNIPER — ${title}</h1><div class="date">${now} (IST) • ${period}</div></div>`;
+  html += `<div class="stats">
+    <div class="stat"><div class="num gold">${totalEntries}</div><div class="label">ENTRIES</div></div>
+    <div class="stat"><div class="num green">${totalTPs}</div><div class="label">TP HITS</div></div>
+    <div class="stat"><div class="num red">${totalSLs}</div><div class="label">SL HITS</div></div>
+    <div class="stat"><div class="num gold">${totalDones}</div><div class="label">FULL CYCLES</div></div>
+    <div class="stat"><div class="num ${overallWR >= 50 ? 'green' : 'red'}">${overallWR}%</div><div class="label">WIN RATE</div></div>
+    <div class="stat"><div class="num green">${activeTrades.length}</div><div class="label">ACTIVE</div></div>
+  </div>`;
 
-  function drawRect(x: number, y: number, w: number, h: number, color: any, radius = 0) {
-    if (radius > 0) {
-      // Rounded rect approximation
-      page.drawRectangle({ x, y, width: w, height: h, color, radius });
-    } else {
-      page.drawRectangle({ x, y, width: w, height: h, color });
-    }
-  }
-
-  function drawText(text: string, x: number, y: number, size: number, color: any, f = font) {
-    page.drawText(text, { x, y, size, color, font: f });
-  }
-
-  function textW(text: string, size: number, f = font) {
-    return f.widthOfTextAtSize(text, size);
-  }
-
-  // ── Header ──
-  drawRect(MARGIN, y - 60, contentW, 60, DARK, 8);
-  const title = mode === 'morning' ? 'MORNING REPORT' : 'DAILY REPORT';
-  drawText('GOLD SNIPER', MARGIN + 16, y - 26, 22, GOLD, fontBold);
-  drawText(title, MARGIN + 16, y - 46, 12, GRAY);
-  drawText(now + ' (IST)', PAGE_W - MARGIN - textW(now + ' (IST)', 10, font) - 16, y - 26, 10, GRAY);
-  drawText(`${mode === 'morning' ? 'Overnight (12h)' : "Today's History"}`, PAGE_W - MARGIN - 120, y - 46, 10, GRAY);
-  y -= 80;
-
-  // ── Summary Stat Tiles ──
-  const tileW = (contentW - 20) / 6;
-  const tileH = 50;
-  const stats = [
-    { label: 'ENTRIES', value: String(totalEntries), color: GOLD },
-    { label: 'TP HITS', value: String(totalTPs), color: GREEN },
-    { label: 'SL HITS', value: String(totalSLs), color: RED },
-    { label: 'CYCLES', value: String(totalDones), color: GOLD },
-    { label: 'WIN RATE', value: overallWR + '%', color: overallWR >= 50 ? GREEN : RED },
-    { label: 'ACTIVE', value: String(activeTrades.length), color: GREEN },
-  ];
-  
-  for (let i = 0; i < stats.length; i++) {
-    const tx = MARGIN + i * (tileW + 4);
-    drawRect(tx, y - tileH, tileW, tileH, MID, 6);
-    drawText(stats[i].value, tx + tileW/2 - textW(stats[i].value, 20, fontBold)/2, y - 22, 20, stats[i].color, fontBold);
-    drawText(stats[i].label, tx + tileW/2 - textW(stats[i].label, 8, font)/2, y - 40, 8, GRAY);
-  }
-  y -= tileH + 16;
-
-  // ── Timeframe Sections ──
+  // Timeframe sections
   for (const tf of TFS) {
     const d = tfData[tf];
     if (d.entries.length === 0 && d.tps.length === 0 && d.sls.length === 0 && d.dones.length === 0) continue;
+
+    const wrClass = d.winRate >= 60 ? 'wr-good' : d.winRate >= 40 ? 'wr-neutral' : d.winRate > 0 ? 'wr-bad' : 'wr-neutral';
+
+    html += `<div class="tf-section">`;
+    html += `<div class="tf-header"><span class="tf-name">${tf}</span><span class="tf-winrate ${wrClass}">${d.winRate}% WR</span></div>`;
+    html += `<div class="tf-stats">Cycles: ${d.cycles} | Wins: ${d.wins} | Losses: ${d.losses} | TPs: ${d.tps.length} | Full Cycles: ${d.dones.length}</div>`;
 
     // Merge all events sorted by time
     const allEvents: {time: string, type: string, data: any}[] = [];
@@ -293,149 +237,64 @@ Deno.serve(async (req) => {
     d.dones.forEach(a => allEvents.push({ time: String(a.created_at).substring(11, 19), type: 'alldone', data: a }));
     allEvents.sort((a, b) => a.time.localeCompare(b.time));
 
-    const sectionH = 50 + allEvents.length * 18 + 10;
-    ensureSpace(sectionH);
-
-    // TF header bar
-    drawRect(MARGIN, y - 28, contentW, 28, MID, 6);
-    drawText(tf, MARGIN + 12, y - 19, 14, GOLD, fontBold);
+    html += `<table><tr><th>Time</th><th>Event</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP #</th><th>TP Price</th><th>Price</th><th>Cycle</th></tr>`;
     
-    // Win rate badge
-    const wrText = `${d.winRate}% WR`;
-    const wrColor = d.winRate >= 60 ? GREEN : d.winRate >= 40 ? GOLD : d.winRate > 0 ? RED : GRAY;
-    const wrW = textW(wrText, 11, fontBold) + 16;
-    drawRect(MARGIN + 50, y - 22, wrW, 18, DARK, 4);
-    drawText(wrText, MARGIN + 58, y - 16, 11, wrColor, fontBold);
-    
-    // Stats text
-    const stText = `Cycles: ${d.cycles}  Wins: ${d.wins}  Losses: ${d.losses}  TPs: ${d.tps.length}  Full: ${d.dones.length}`;
-    drawText(stText, PAGE_W - MARGIN - textW(stText, 9, font) - 12, y - 18, 9, GRAY);
-    y -= 36;
-
-    // Table header
-    const colX = [MARGIN + 4, MARGIN + 60, MARGIN + 110, MARGIN + 175, MARGIN + 240, MARGIN + 280, MARGIN + 320, MARGIN + 380, MARGIN + 430];
-    const headers = ['Time', 'Event', 'Dir', 'Entry', 'SL', 'TP#', 'TP Price', 'Price', 'Cycle'];
-    drawRect(MARGIN, y - 16, contentW, 16, DARK);
-    for (let i = 0; i < headers.length; i++) {
-      drawText(headers[i], colX[i], y - 12, 8, GRAY, fontBold);
-    }
-    y -= 18;
-
-    // Event rows
     for (const ev of allEvents) {
-      ensureSpace(18);
       const a = ev.data;
-      
-      let icon = '', eventColor = WHITE;
-      if (ev.type === 'entry') { icon = 'ENTRY'; eventColor = GREEN; }
-      else if (ev.type === 'tp') { icon = 'TP HIT'; eventColor = GREEN; }
-      else if (ev.type === 'sl') { icon = 'SL HIT'; eventColor = RED; }
-      else { icon = 'FULL CYCLE'; eventColor = GOLD; }
+      let icon, eventClass;
+      if (ev.type === 'entry') { icon = '🟢 ENTRY'; eventClass = 'green'; }
+      else if (ev.type === 'tp') { icon = '✅ TP HIT'; eventClass = 'green'; }
+      else if (ev.type === 'sl') { icon = '🛑 SL HIT'; eventClass = 'red'; }
+      else { icon = '🎉 FULL CYCLE'; eventClass = 'gold'; }
       
       const dir = getDir(tf, a);
-      const dirText = dir ? dir.toUpperCase().substring(0, 5) : '-';
-      const dirColor = (dir === 'buy' || dir === 'long') ? GREEN : (dir === 'sell' || dir === 'short') ? RED : GRAY;
+      const dirClass = (dir === 'buy' || dir === 'long') ? 'green' : (dir === 'sell' || dir === 'short') ? 'red' : '';
+      const dirText = dir ? dir.toUpperCase() : '-';
       
       const entryPrice = getEntry(tf, a);
       const slPrice = getSL(tf, a);
-      const tpNum = a.tp_num || a.tpNum || '-';
-      const tpPrice = (a.tp_price || a.tpPrice) ? '$' + Number(a.tp_price || a.tpPrice).toFixed(2) : '-';
-      const price = a.price ? '$' + Number(a.price).toFixed(2) : '-';
-      const cycle = '#' + (a.cycle || '-');
-
-      // Alternating row background
-      const rowIdx = allEvents.indexOf(ev);
-      if (rowIdx % 2 === 0) drawRect(MARGIN, y - 14, contentW, 14, MID);
-
-      drawText(ev.time, colX[0], y - 11, 8, GRAY, fontMono);
-      drawText(icon, colX[1], y - 11, 8, eventColor, fontBold);
-      drawText(dirText, colX[2], y - 11, 8, dirColor);
-      drawText(entryPrice ? '$' + entryPrice.toFixed(2) : '-', colX[3], y - 11, 8, WHITE);
-      drawText(slPrice ? '$' + slPrice.toFixed(2) : '-', colX[4], y - 11, 8, WHITE);
-      drawText(String(tpNum), colX[5], y - 11, 8, WHITE);
-      drawText(tpPrice, colX[6], y - 11, 8, WHITE);
-      drawText(price, colX[7], y - 11, 8, WHITE);
-      drawText(cycle, colX[8], y - 11, 8, GRAY);
       
-      y -= 16;
+      html += `<tr class="event-row">
+        <td class="time-col">${ev.time}</td>
+        <td class="${eventClass}"><b>${icon}</b></td>
+        <td class="${dirClass}">${dirText}</td>
+        <td>${entryPrice ? '$' + entryPrice.toFixed(2) : '-'}</td>
+        <td>${slPrice ? '$' + slPrice.toFixed(2) : '-'}</td>
+        <td>${a.tp_num || a.tpNum || '-'}</td>
+        <td>${(a.tp_price || a.tpPrice) ? '$' + Number(a.tp_price || a.tpPrice).toFixed(2) : '-'}</td>
+        <td>${a.price ? '$' + Number(a.price).toFixed(2) : '-'}</td>
+        <td>#${a.cycle || '-'}</td>
+      </tr>`;
     }
-    y -= 12;
+    html += `</table></div>`;
   }
 
-  // ── Active Trades ──
+  // Active trades
   if (activeTrades.length > 0) {
-    ensureSpace(50 + activeTrades.length * 18);
-    drawRect(MARGIN, y - 28, contentW, 28, MID, 6);
-    drawText('ACTIVE TRADES', MARGIN + 12, y - 19, 14, GREEN, fontBold);
-    y -= 36;
-
-    const aColX = [MARGIN + 4, MARGIN + 55, MARGIN + 110, MARGIN + 180, MARGIN + 240, MARGIN + 290, MARGIN + 340, MARGIN + 400];
-    const aHeaders = ['TF', 'Dir', 'Entry', 'SL', 'TPs Hit', 'Cycle', 'RSI', 'AI'];
-    drawRect(MARGIN, y - 16, contentW, 16, DARK);
-    for (let i = 0; i < aHeaders.length; i++) {
-      drawText(aHeaders[i], aColX[i], y - 12, 8, GRAY, fontBold);
-    }
-    y -= 18;
-
-    activeTrades.forEach((t, idx) => {
-      ensureSpace(16);
-      const dc = t.dir === 'long' ? GREEN : RED;
-      if (idx % 2 === 0) drawRect(MARGIN, y - 14, contentW, 14, MID);
-      drawText(t.tf, aColX[0], y - 11, 8, GOLD, fontBold);
-      drawText(t.dir.toUpperCase(), aColX[1], y - 11, 8, dc);
-      drawText('$' + t.entry.toFixed(2), aColX[2], y - 11, 8, WHITE);
-      drawText('$' + t.sl.toFixed(2), aColX[3], y - 11, 8, WHITE);
-      drawText(t.tpsHit + '/5', aColX[4], y - 11, 8, GREEN);
-      drawText('#' + t.cycle, aColX[5], y - 11, 8, GRAY);
-      drawText(t.rsi ? Number(t.rsi).toFixed(1) : '-', aColX[6], y - 11, 8, WHITE);
-      drawText(t.aiRec || '-', aColX[7], y - 11, 8, WHITE);
-      y -= 16;
+    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name">🟢 Active Trades</span></div>`;
+    html += `<table><tr><th>TF</th><th>Dir</th><th>Entry</th><th>SL</th><th>TPs Hit</th><th>Cycle</th><th>RSI</th><th>AI</th></tr>`;
+    activeTrades.forEach(t => {
+      const dc = t.dir === 'long' ? 'green' : 'red';
+      html += `<tr><td><b>${t.tf}</b></td><td class="${dc}">${t.dir.toUpperCase()}</td><td>$${t.entry.toFixed(2)}</td><td>$${t.sl.toFixed(2)}</td><td>${t.tpsHit}/5</td><td>#${t.cycle}</td><td>${t.rsi ? Number(t.rsi).toFixed(1) : '-'}</td><td>${t.aiRec || '-'}</td></tr>`;
     });
-    y -= 12;
+    html += `</table></div>`;
   }
 
-  // Footer
-  ensureSpace(30);
-  drawRect(MARGIN, y - 20, contentW, 20, DARK, 4);
-  drawText('Gold Sniper Trading System • EMA 9/21 • ' + TFS.join('/') + ' • Auto ' + mode + ' report', 
-    MARGIN + 8, y - 14, 8, GRAY);
+  if (totalEntries === 0 && totalTPs === 0 && totalSLs === 0) {
+    html += `<div class="tf-section" style="text-align:center;color:#666;padding:24px">No trades in this period. System monitoring active 24/7.</div>`;
+  }
 
-  // Save PDF
-  const pdfBytes = await pdfDoc.save();
+  html += `<div class="footer">Gold Sniper Trading System • EMA 9/21 Crossover • ${TFS.join(' / ')} • Auto ${mode} report at ${mode === 'morning' ? '09:00' : '23:00'} IST</div>`;
+  html += `</body></html>`;
 
-  // ════════════════════════════════════════
-  // Send Email with PDF attachment via Resend
-  // ════════════════════════════════════════
   const subject = mode === 'morning'
-    ? `☀️ Gold Sniper Morning Report — ${today} | WR ${overallWR}%`
-    : `🎯 Gold Sniper Daily Report — ${today} | ${totalTPs} TPs, ${totalSLs} SLs | WR ${overallWR}%`;
+    ? `☀️ Gold Sniper Morning — ${today} | ${activeTrades.length} active, ${totalTPs} TPs, ${totalSLs} SLs | WR ${overallWR}%`
+    : `🎯 Gold Sniper Daily — ${today} | ${totalEntries} entries, ${totalTPs} TPs, ${totalSLs} SLs | WR ${overallWR}%`;
 
-  // Build HTML body (brief summary, full details in PDF)
-  let htmlBody = `<!DOCTYPE html><html><body style="font-family:Arial;background:#0a0a0f;color:#e0e0e0;padding:20px">
-  <h2 style="color:#FFD700">Gold Sniper — ${title}</h2>
-  <p style="color:#888">${now} (IST)</p>
-  <table style="border-collapse:collapse;width:100%;max-width:500px">
-  <tr><td style="background:#12121a;padding:10px;text-align:center"><b style="font-size:20px;color:#FFD700">${totalEntries}</b><br><small style="color:#888">ENTRIES</small></td>
-  <td style="background:#12121a;padding:10px;text-align:center"><b style="font-size:20px;color:#00e676">${totalTPs}</b><br><small style="color:#888">TP HITS</small></td>
-  <td style="background:#12121a;padding:10px;text-align:center"><b style="font-size:20px;color:#ff4444">${totalSLs}</b><br><small style="color:#888">SL HITS</small></td>
-  <td style="background:#12121a;padding:10px;text-align:center"><b style="font-size:20px;color:${overallWR>=50?'#00e676':'#ff4444'}">${overallWR}%</b><br><small style="color:#888">WIN RATE</small></td>
-  <td style="background:#12121a;padding:10px;text-align:center"><b style="font-size:20px;color:#00e676">${activeTrades.length}</b><br><small style="color:#888">ACTIVE</small></td></tr>
-  </table>`;
-
-  for (const tf of TFS) {
-    const d = tfData[tf];
-    if (d.entries.length === 0 && d.tps.length === 0 && d.sls.length === 0) continue;
-    htmlBody += `<p><b style="color:#FFD700">${tf}</b> — WR ${d.winRate}% | ${d.wins}W ${d.losses}L | ${d.tps.length} TPs, ${d.sls.length} SLs</p>`;
-  }
-  htmlBody += `<p style="color:#888;margin-top:20px">📄 Full timeframe-wise report with entry prices, TP/SL times attached as PDF.</p>`;
-  htmlBody += `</body></html>`;
-
+  // Send Email via Resend (styled HTML, no attachment)
   let emailResult = { success: false, error: 'No RESEND_API_KEY' };
   if (RESEND_KEY) {
     try {
-      // Resend attachment format: base64 encoded
-      const pdfBase64 = btoa(String.fromCharCode(...pdfBytes));
-      
       const resp = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
@@ -443,11 +302,7 @@ Deno.serve(async (req) => {
           from: 'Gold Sniper <onboarding@resend.dev>',
           to: TO_EMAIL,
           subject,
-          html: htmlBody,
-          attachments: [{
-            filename: `gold_sniper_report_${today}.pdf`,
-            content: pdfBase64
-          }]
+          html
         })
       });
       const data = await resp.json();
@@ -457,7 +312,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ── WhatsApp summary ──
+  // WhatsApp summary
   let waMsg = `*GOLD SNIPER — ${mode === 'morning' ? 'MORNING' : 'DAILY'} REPORT*\n${now} (IST)\n\n`;
   waMsg += `📊 *${totalEntries} entries | ${totalTPs} TPs | ${totalSLs} SLs | WR ${overallWR}%*\n\n`;
   for (const tf of TFS) {
@@ -484,7 +339,7 @@ Deno.serve(async (req) => {
       waMsg += `${t.tf} ${t.dir.toUpperCase()} $${t.entry.toFixed(2)} TPs:${t.tpsHit}/5 #${t.cycle}\n`;
     });
   }
-  waMsg += `\n📄 PDF report sent to email\n_Gold Sniper • EMA 9/21_`;
+  waMsg += `\n_Gold Sniper • EMA 9/21 • ${TFS.join('/')}_`;
 
   const waResults: any[] = [];
   for (const phone of RECIPIENTS) {
@@ -508,7 +363,6 @@ Deno.serve(async (req) => {
     email: emailResult,
     whatsapp: waResults,
     overallWinRate: overallWR,
-    pdfSize: pdfBytes.length,
     stats: { entries: totalEntries, tps: totalTPs, sls: totalSLs, fullCycles: totalDones, activeTrades: activeTrades.length }
   }), { headers: { 'Content-Type': 'application/json' } });
 });
