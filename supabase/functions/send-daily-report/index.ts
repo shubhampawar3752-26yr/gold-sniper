@@ -282,7 +282,71 @@ Deno.serve(async (req) => {
       </tr>`;
     }
     html += `</table>`;
-html += `</div>`;
+    
+    // ── Per-cycle summary: Entry, SL, TP1-TP5 hit status ──
+    const cycles = new Map();
+    function getCycle(c) {
+      if (!c) c = 0;
+      if (!cycles.has(c)) cycles.set(c, { entry: null, dir: '', sl: null, tps: {}, slHit: false, allDone: false });
+      return cycles.get(c);
+    }
+    for (const a of d.entries) {
+      const cy = getCycle(a.cycle);
+      cy.entry = a.entry ? Number(a.entry) : null;
+      cy.dir = a.direction || '';
+      cy.sl = a.sl ? Number(a.sl) : null;
+      if (a.tp) cy.tpPrices = [a.tp.tp1, a.tp.tp2, a.tp.tp3, a.tp.tp4, a.tp.tp5];
+    }
+    for (const a of d.tps) {
+      let c = a.cycle;
+      if (!c) { const m = findEntryByTime(tf, a.created_at); if (m) c = m.cycle; }
+      const cy = getCycle(c);
+      if (!cy.entry) cy.entry = getEntry(tf, a);
+      if (!cy.dir) cy.dir = getDir(tf, a);
+      if (!cy.sl) cy.sl = getSL(tf, a);
+      const tpN = a.tp_num || a.tpNum || 0;
+      cy.tps[tpN] = Number(a.tp_price || a.tpPrice || 0);
+    }
+    for (const a of d.sls) {
+      const cy = getCycle(a.cycle);
+      cy.slHit = true;
+      if (!cy.entry) cy.entry = getEntry(tf, a);
+      if (!cy.dir) cy.dir = getDir(tf, a);
+      if (!cy.sl) cy.sl = getSL(tf, a);
+    }
+    for (const a of d.dones) { getCycle(a.cycle).allDone = true; }
+    
+    if (cycles.size > 0) {
+      html += `<table style="margin-top:10px"><tr><th>#</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>TP5</th><th>Status</th></tr>`;
+      const sorted = Array.from(cycles.entries()).sort(function(a, b) { return b[0] - a[0]; });
+      for (const pair of sorted) {
+        const cNum = pair[0], cy = pair[1];
+        const dirClass = (cy.dir === 'buy' || cy.dir === 'long') ? 'green' : (cy.dir === 'sell' || cy.dir === 'short') ? 'red' : '';
+        const dirText = cy.dir ? cy.dir.toUpperCase() : '-';
+        // Get TP prices from entry alert or trading state
+        const s = state[tf];
+        let tpPrices = (cy.tpPrices || []);
+        if (tpPrices.length === 0 && cy.entry && s && s.entry && Math.abs(s.entry - cy.entry) < 0.5) {
+          tpPrices = [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5];
+        }
+        let tpCols = '';
+        for (let i = 1; i <= 5; i++) {
+          const hit = cy.tps[i] != null;
+          const price = hit ? cy.tps[i] : (tpPrices[i-1] || 0);
+          if (hit) tpCols += `<td class="green">✅ $${price.toFixed(2)}</td>`;
+          else if (price) tpCols += `<td style="color:#555">⬜ $${price.toFixed(2)}</td>`;
+          else tpCols += `<td style="color:#444">-</td>`;
+        }
+        let status, statusClass;
+        if (cy.allDone) { status = '🎉 FULL'; statusClass = 'gold'; }
+        else if (cy.slHit) { status = '🛑 SL'; statusClass = 'red'; }
+        else { status = '🟢 ' + Object.keys(cy.tps).length + '/5'; statusClass = 'green'; }
+        html += `<tr><td>#${cNum}</td><td class="${dirClass}">${dirText}</td><td>${cy.entry ? '$' + cy.entry.toFixed(2) : '-'}</td><td>${cy.sl ? '$' + cy.sl.toFixed(2) : '-'}</td>${tpCols}<td class="${statusClass}"><b>${status}</b></td></tr>`;
+      }
+      html += `</table>`;
+    }
+    
+    html += `</div>`;
   }
 
   // Active trades
