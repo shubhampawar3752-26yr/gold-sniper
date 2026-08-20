@@ -12,6 +12,8 @@ const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_API_KEY')!;
 //   5. DB fallback -> keep last known good values
 //
 // Smart: if already updated today, skip (prevent stale overwrite)
+// NOTE: cron should run at 02:30 IST (after US market close at 01:30 IST)
+// to ensure TradingView has rolled over to the new daily candle.
 
 const TV_SYMBOL = 'OANDA:XAUUSD';
 const TV_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Origin': 'https://www.tradingview.com' };
@@ -52,8 +54,32 @@ Deno.serve(async (req) => {
   let prevClose = 0, open = 0, high = 0, low = 0, close = 0;
   let source = '';
 
-  // ── Source 1: TradingView scanner ──
-  if (prevClose === 0) {
+  // ── Source 1: TwelveData quote API (BEST for prevClose) ──
+  // TwelveData's previous_close = last COMPLETED day's close, regardless of current candle status.
+  // This fixes the bug where TradingView returns prevClose of 2 days ago at 00:05 IST
+  // (because the current daily candle hasn't closed yet — US market still open).
+  try {
+    const r = await fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const pc = parseFloat(data?.previous_close);
+      if (!isNaN(pc) && pc > 0) {
+        prevClose = pc;
+        source = 'twelvedata';
+        open = parseFloat(data?.open) || open;
+        high = parseFloat(data?.high) || high;
+        low = parseFloat(data?.low) || low;
+        close = parseFloat(data?.close) || close;
+        console.log(`TwelveData: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
+      }
+    }
+  } catch (e) { console.error('TwelveData failed:', (e as Error).message); }
+
+  // ── Source 2: TradingView scanner (fills OHLC + prevClose fallback) ──
+  // Use TradingView to fill in OHLC if TwelveData missed them, and as prevClose fallback.
+  {
     try {
       const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(TV_SYMBOL)}&fields=open,high,low,close,change_abs`;
       const r = await fetch(url, { headers: TV_HEADERS });
@@ -65,45 +91,26 @@ Deno.serve(async (req) => {
         const tvLow = parseFloat(data?.low);
         const changeAbs = parseFloat(data?.change_abs);
 
-        if (!isNaN(tvClose) && !isNaN(changeAbs) && tvClose > 0 && changeAbs > 0) {
-          prevClose = tvClose - changeAbs;
+        // Fill OHLC from TradingView (more reliable intraday)
+        if (open === 0 && !isNaN(tvOpen) && tvOpen > 0) open = tvOpen;
+        if (high === 0 && !isNaN(tvHigh) && tvHigh > 0) high = tvHigh;
+        if (low === 0 && !isNaN(tvLow) && tvLow > 0) low = tvLow;
+        if (close === 0 && !isNaN(tvClose) && tvClose > 0) close = tvClose;
+
+        // Fallback prevClose from TradingView if TwelveData failed
+        if (prevClose === 0 && !isNaN(tvClose) && !isNaN(changeAbs) && tvClose > 0) {
+          const calc = tvClose - changeAbs;
+          if (calc > 0) prevClose = calc;
         }
-        if (!isNaN(tvOpen) && tvOpen > 0) open = tvOpen;
-        if (!isNaN(tvHigh) && tvHigh > 0) high = tvHigh;
-        if (!isNaN(tvLow) && tvLow > 0) low = tvLow;
-        if (!isNaN(tvClose) && tvClose > 0) close = tvClose;
+        // Last resort: use open as prevClose
+        if (prevClose === 0 && !isNaN(tvOpen) && tvOpen > 0) prevClose = tvOpen;
 
-        // Fallback prevClose from open if change_abs missing
-        if (prevClose === 0 && open > 0) prevClose = open;
-
+        if (source === '' && prevClose > 0) source = 'tradingview';
         if (prevClose > 0) {
-          source = 'tradingview';
-          console.log(`TradingView: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
+          console.log(`TradingView fill: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
         }
       }
     } catch (e) { console.error('TradingView failed:', (e as Error).message); }
-  }
-
-  // ── Source 2: TwelveData quote API ──
-  if (prevClose === 0) {
-    try {
-      const r = await fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${TWELVE_DATA_KEY}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
-      });
-      if (r.ok) {
-        const data = await r.json();
-        const pc = parseFloat(data?.previous_close);
-        if (!isNaN(pc) && pc > 0) {
-          prevClose = pc;
-          source = 'twelvedata';
-          open = parseFloat(data?.open) || open;
-          high = parseFloat(data?.high) || high;
-          low = parseFloat(data?.low) || low;
-          close = parseFloat(data?.close) || close;
-          console.log(`TwelveData: prevClose=${prevClose} open=${open} high=${high} low=${low} close=${close}`);
-        }
-      }
-    } catch (e) { console.error('TwelveData failed:', (e as Error).message); }
   }
 
   // ── Source 3: Alpha Vantage ──
