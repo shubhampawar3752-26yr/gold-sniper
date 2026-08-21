@@ -6,509 +6,415 @@
 <title>Lyra AI</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-:root {
-  --bg: #212121; --surface: #303030; --surface-hover: #3a3a3a;
-  --border: #424242; --input-bg: #2f2f2f;
-  --text: #ececec; --muted: #9b9b9b;
-  --accent: #10a37f; --accent-hover: #0d8c6d;
-  --gold: #FFD700; --gold-dim: #B8860B;
-  --green: #00e676; --red: #ff4444;
-  --user-bubble: #2f2f2f;
-}
-html, body { height: 100%; }
-body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -apple-system, system-ui, sans-serif; display: flex; }
-
-/* ── Sidebar ── */
-.sidebar { width: 260px; background: #171717; border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: width 0.2s; flex-shrink: 0; }
-.sidebar.collapsed { width: 0; overflow: hidden; }
-.sidebar-top { padding: 12px; }
-.new-chat-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; cursor: pointer; transition: background 0.15s; }
-.new-chat-btn:hover { background: var(--surface-hover); }
-.new-chat-btn svg { width: 18px; height: 18px; }
-.nav-items { flex: 1; overflow-y: auto; padding: 8px 12px; }
-.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.15s; }
-.nav-item:hover { background: var(--surface); color: var(--text); }
-.nav-item.active { background: var(--surface); color: var(--text); }
-.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
-.sidebar-bottom { padding: 12px; border-top: 1px solid var(--border); }
-.sidebar-btn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.15s; width: 100%; }
-.sidebar-btn:hover { background: var(--surface); color: var(--text); }
-
-/* ── Main ── */
-.main { flex: 1; display: flex; flex-direction: column; height: 100vh; }
-
-/* ── Top bar ── */
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-.topbar-left { display: flex; align-items: center; gap: 10px; }
-.icon-btn { width: 36px; height: 36px; border-radius: 8px; background: transparent; border: none; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s; }
-.icon-btn:hover { background: var(--surface); }
-.icon-btn svg { width: 20px; height: 20px; }
-.model-label { font-size: 16px; font-weight: 600; }
-.model-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
-.topbar-right { display: flex; align-items: center; gap: 8px; }
-.avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #000; cursor: pointer; }
-
-/* ── Chat area ── */
-.chat-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
-.chat-container { max-width: 768px; margin: 0 auto; width: 100%; padding: 24px 20px 120px; }
-
-/* Welcome screen */
-.welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 24px; }
-.welcome-logo { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 24px; }
-.welcome h2 { font-size: 28px; font-weight: 600; color: var(--text); }
-.welcome-suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 520px; }
-.suggestion-card { padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.15s; font-size: 13px; color: var(--muted); }
-.suggestion-card:hover { background: var(--surface-hover); color: var(--text); }
-.suggestion-card strong { display: block; color: var(--text); margin-bottom: 4px; font-size: 14px; }
-
-/* Messages — ChatGPT style (no bubbles, avatar + text) */
-.msg { display: flex; gap: 16px; padding: 20px 0; }
-.msg-avatar { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; }
-.msg-avatar.assistant { background: linear-gradient(135deg, var(--gold), var(--gold-dim)); color: #000; }
-.msg-avatar.user { background: #5436DA; color: #fff; }
-.msg-content { flex: 1; line-height: 1.7; font-size: 15px; overflow-wrap: break-word; }
-.msg-content p { margin-bottom: 12px; }
-.msg-content p:last-child { margin-bottom: 0; }
-.msg-content h1, .msg-content h2, .msg-content h3 { margin: 16px 0 8px; font-weight: 600; }
-.msg-content h1 { font-size: 20px; } .msg-content h2 { font-size: 18px; } .msg-content h3 { font-size: 16px; }
-.msg-content ul, .msg-content ol { margin: 8px 0 12px; padding-left: 24px; }
-.msg-content li { margin-bottom: 4px; }
-.msg-content code { background: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Consolas, monospace; font-size: 13px; }
-.msg-content pre { background: #1a1a1a; padding: 14px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
-.msg-content pre code { background: none; padding: 0; }
-.msg-content table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-.msg-content th, .msg-content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; font-size: 14px; }
-.msg-content th { background: var(--surface); font-weight: 600; }
-.msg-content a { color: var(--accent); text-decoration: none; }
-.msg-content a:hover { text-decoration: underline; }
-.msg-content strong { font-weight: 600; }
-.msg-content blockquote { border-left: 3px solid var(--border); padding-left: 16px; color: var(--muted); margin: 8px 0; }
-.msg-skill { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; background: #1a3a1a; color: var(--green); border: 1px solid #2a4a2a; margin-top: 8px; }
-
-/* Typing indicator */
-.typing { display: flex; gap: 16px; padding: 20px 0; }
-.typing-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 14px; }
-.typing-dots { display: flex; gap: 4px; align-items: center; height: 28px; }
-.typing-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite; }
-.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes pulse { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
-
-/* ── Input bar (ChatGPT style) ── */
-.input-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px 20px; background: linear-gradient(to top, var(--bg) 60%, transparent); }
-.input-container { max-width: 768px; margin: 0 auto; position: relative; }
-.input-box { display: flex; align-items: flex-end; gap: 10px; background: var(--input-bg); border: 1px solid var(--border); border-radius: 28px; padding: 8px 8px 8px 20px; transition: border-color 0.15s; }
-.input-box:focus-within { border-color: var(--muted); }
-.input-box textarea { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 15px; font-family: inherit; resize: none; max-height: 200px; line-height: 1.5; padding: 8px 0; }
-.input-box textarea::placeholder { color: var(--muted); }
-.send-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--text); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
-.send-btn:hover { opacity: 0.85; }
-.send-btn:disabled { background: var(--muted); opacity: 0.4; cursor: not-allowed; }
-.send-btn svg { width: 18px; height: 18px; }
-.input-info { text-align: center; font-size: 11px; color: var(--muted); margin-top: 8px; }
-.input-info a { color: var(--muted); text-decoration: underline; cursor: pointer; }
-
-/* ── Charts view ── */
-#chartsView { display: none; flex: 1; overflow-y: auto; padding: 20px; }
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; max-width: 768px; margin-left: auto; margin-right: auto; }
-.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
-.stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-.stat-card .value.green { color: var(--green); }
-.stat-card .value.red { color: var(--red); }
-.stat-card .value.gold { color: var(--gold); }
-.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; max-width: 768px; margin: 0 auto; }
-.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-.chart-card h3 { font-size: 13px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-.chart-card canvas { max-height: 250px; }
-.loading { text-align: center; padding: 40px; color: var(--muted); }
-
-/* Mobile */
-@media (max-width: 768px) {
-  .sidebar { position: absolute; z-index: 100; height: 100vh; }
-  .sidebar.collapsed { width: 0; }
-  .welcome-suggestions { grid-template-columns: 1fr; }
-  .chat-container { padding: 16px 12px 120px; }
-  .input-bar { padding: 12px 12px; }
-}
-
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#212121;--surface:#303030;--surface-hover:#3a3a3a;--border:#424242;--input-bg:#2f2f2f;--text:#ececec;--muted:#9b9b9b;--accent:#10a37f;--gold:#FFD700;--gold-dim:#B8860B;--green:#00e676;--red:#ff4444}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;display:flex}
+.sidebar{width:260px;background:#171717;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:width .2s}
+.sidebar.hidden{width:0;overflow:hidden}
+.sb-top{padding:12px}
+.sb-new{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;cursor:pointer}
+.sb-new:hover{background:var(--surface-hover)}
+.sb-items{flex:1;overflow-y:auto;padding:8px 12px}
+.sb-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:var(--muted);font-size:13px;cursor:pointer}
+.sb-item:hover{background:var(--surface);color:var(--text)}
+.sb-item.active{background:var(--surface);color:var(--text)}
+.main{flex:1;display:flex;flex-direction:column;height:100vh}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)}
+.tb-left{display:flex;align-items:center;gap:10px}
+.ibtn{width:36px;height:36px;border-radius:8px;background:transparent;border:none;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.ibtn:hover{background:var(--surface)}
+.ml{font-size:16px;font-weight:600}
+.mb{font-size:11px;padding:2px 8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--muted)}
+.tb-right{display:flex;align-items:center;gap:8px}
+.av{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold-dim));display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#000}
+.chat-area{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.chat-wrap{max-width:768px;margin:0 auto;width:100%;padding:24px 20px 120px}
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:24px}
+.wl{width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold-dim));display:flex;align-items:center;justify-content:center;font-size:24px}
+.welcome h2{font-size:28px;font-weight:600}
+.ws{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:520px}
+.sc{padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;cursor:pointer;font-size:13px;color:var(--muted)}
+.sc:hover{background:var(--surface-hover);color:var(--text)}
+.sc b{display:block;color:var(--text);margin-bottom:4px;font-size:14px}
+.msg{display:flex;gap:16px;padding:20px 0}
+.ma{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px}
+.ma.assistant{background:linear-gradient(135deg,var(--gold),var(--gold-dim));color:#000}
+.ma.user{background:#5436DA;color:#fff}
+.mc{flex:1;line-height:1.7;font-size:15px;overflow-wrap:break-word}
+.mc p{margin-bottom:12px}
+.mc p:last-child{margin-bottom:0}
+.mc h1,.mc h2,.mc h3{margin:16px 0 8px;font-weight:600}
+.mc h1{font-size:20px}.mc h2{font-size:18px}.mc h3{font-size:16px}
+.mc ul,.mc ol{margin:8px 0 12px;padding-left:24px}
+.mc li{margin-bottom:4px}
+.mc code{background:#1a1a1a;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:13px}
+.mc pre{background:#1a1a1a;padding:14px;border-radius:8px;overflow-x:auto;margin:8px 0}
+.mc pre code{background:none;padding:0}
+.mc table{width:100%;border-collapse:collapse;margin:8px 0}
+.mc th,.mc td{border:1px solid var(--border);padding:8px 12px;text-align:left;font-size:14px}
+.mc th{background:var(--surface);font-weight:600}
+.mc a{color:var(--accent);text-decoration:none}
+.mc strong{font-weight:600}
+.typing{display:flex;gap:16px;padding:20px 0;align-items:center}
+.ta{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold-dim));display:flex;align-items:center;justify-content:center;font-size:14px}
+.td{display:flex;gap:4px;align-items:center;height:28px}
+.td span{width:8px;height:8px;border-radius:50%;background:var(--muted);animation:p 1.2s infinite}
+.td span:nth-child(2){animation-delay:.2s}
+.td span:nth-child(3){animation-delay:.4s}
+@keyframes p{0%,80%,100%{opacity:.3}40%{opacity:1}}
+.input-bar{position:fixed;bottom:0;left:0;right:0;padding:16px 20px;background:linear-gradient(to top,var(--bg) 60%,transparent)}
+.input-wrap{max-width:768px;margin:0 auto;position:relative}
+.input-box{display:flex;align-items:flex-end;gap:10px;background:var(--input-bg);border:1px solid var(--border);border-radius:28px;padding:8px 8px 8px 20px}
+.input-box:focus-within{border-color:var(--muted)}
+#input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:15px;font-family:inherit;resize:none;max-height:200px;line-height:1.5;padding:8px 0}
+#input::placeholder{color:var(--muted)}
+#sendBtn{width:36px;height:36px;border-radius:50%;background:var(--text);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#sendBtn:hover{opacity:.85}
+#sendBtn:disabled{background:var(--muted);opacity:.4;cursor:not-allowed}
+.ii{text-align:center;font-size:11px;color:var(--muted);margin-top:8px}
+#chartsView{display:none;flex:1;overflow-y:auto;padding:20px}
+.sg{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:20px;max-width:768px;margin-left:auto;margin-right:auto}
+.stc{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.stc .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.stc .v{font-size:22px;font-weight:700;margin-top:4px}
+.stc .v.g{color:var(--green)}.stc .v.r{color:var(--red)}.stc .v.go{color:var(--gold)}
+.cg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;max-width:768px;margin:0 auto}
+.cc{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+.cc h3{font-size:13px;color:var(--muted);margin-bottom:12px;text-transform:uppercase}
+.cc canvas{max-height:250px}
+@media(max-width:768px){.sidebar{position:absolute;z-index:100;height:100vh}.ws{grid-template-columns:1fr}.chat-wrap{padding:16px 12px 120px}.input-bar{padding:12px}}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 </style>
 </head>
 <body>
 
-<!-- ── App ── -->
-<div style="display:flex;width:100%;height:100vh" id="app">
-
-  <!-- Sidebar -->
-  <div class="sidebar" id="sidebar">
-    <div class="sidebar-top">
-      <button class="new-chat-btn" onclick="newChat()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-        New chat
-      </button>
+<div class="main">
+  <div class="topbar">
+    <div class="tb-left">
+      <button class="ibtn" id="menuBtn">☰</button>
+      <span class="ml">Lyra</span>
+      <span class="mb">GPT-OSS-120B</span>
     </div>
-    <div class="nav-items">
-      <div class="nav-item active" onclick="switchView('chat', this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        Chat
-      </div>
-      <div class="nav-item" onclick="switchView('charts', this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>
-        Charts
-      </div>
-      <div class="nav-item" onclick="askSkill('What is the current gold price?')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        Live Price
-      </div>
-      <div class="nav-item" onclick="askSkill('Show me active trades')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-        Active Trades
-      </div>
-      <div class="nav-item" onclick="askSkill('Show me AI candle analysis')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 8v4M12 16h.01"/></svg>
-        AI Patterns
-      </div>
-      <div class="nav-item" onclick="askSkill('Show me trade performance stats')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
-        Performance
-      </div>
-      <div class="nav-item" onclick="askSkill('Recent alerts')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        Alerts
-      </div>
-      <div class="nav-item" onclick="askSkill('Engine status?')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
-        Engine Status
-      </div>
-      <div class="nav-item" onclick="askSkill('Full market analysis')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>
-        Market Analysis
-      </div>
-      <div class="nav-item" onclick="askSkill('List all files in the GitHub repo')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-        File Browser
-      </div>
-      <div class="nav-item" onclick="askSkill('List all tables in the database')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-        Database
-      </div>
-    </div>
-    <div class="sidebar-bottom">
-
+    <div class="tb-right">
+      <span style="font-size:12px;color:var(--muted)">14 Skills</span>
+      <div class="av">SP</div>
     </div>
   </div>
 
-  <!-- Main area -->
-  <div class="main">
-    <div class="topbar">
-      <div class="topbar-left">
-        <button class="icon-btn" onclick="toggleSidebar()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
-        </button>
-        <span class="model-label">Lyra</span>
-        <span class="model-badge">GPT-OSS-120B</span>
-      </div>
-      <div class="topbar-right">
-        <span style="font-size:12px;color:var(--muted)">14 Skills</span>
-        <div class="avatar">SP</div>
-      </div>
-    </div>
-
-    <!-- Chat -->
-    <div class="chat-area" id="chatArea">
-      <div class="chat-container" id="chatContainer">
-        <div class="welcome" id="welcome">
-          <div class="welcome-logo">🎯</div>
-          <h2>How can I help you?</h2>
-          <div class="welcome-suggestions">
-            <div class="suggestion-card" onclick="askSkill('What is the current gold price?')"><strong>Live Gold Price</strong>Get the latest XAU/USD spot price</div>
-            <div class="suggestion-card" onclick="askSkill('Show me active trades')"><strong>Active Trades</strong>See all open positions with TP/SL levels</div>
-            <div class="suggestion-card" onclick="askSkill('Write a Python function to calculate Fibonacci numbers')"><strong>Coding Help</strong>Ask me to write or debug code</div>
-            <div class="suggestion-card" onclick="askSkill('Show me trade performance stats')"><strong>Performance</strong>Win rate, PnL, and trade statistics</div>
-          </div>
+  <div class="chat-area" id="chatArea">
+    <div class="chat-wrap" id="chatWrap">
+      <div class="welcome" id="welcome">
+        <div class="wl">🎯</div>
+        <h2>How can I help you?</h2>
+        <div class="ws">
+          <div class="sc" id="sug1"><b>Live Gold Price</b>Get the latest XAU/USD spot price</div>
+          <div class="sc" id="sug2"><b>Active Trades</b>See all open positions with TP/SL levels</div>
+          <div class="sc" id="sug3"><b>Coding Help</b>Ask me to write or debug code</div>
+          <div class="sc" id="sug4"><b>Performance</b>Win rate, PnL, and trade statistics</div>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Charts -->
-    <div id="chartsView">
-      <div id="chartsLoading" class="loading">Loading charts...</div>
-      <div id="chartsContent" style="display:none">
-        <div class="stats-grid" id="statsGrid"></div>
-        <div class="charts-grid" id="chartsGrid"></div>
-      </div>
+  <div id="chartsView">
+    <div id="chartsLoading" style="text-align:center;padding:40px;color:var(--muted)">Loading charts...</div>
+    <div id="chartsContent" style="display:none">
+      <div class="sg" id="statsGrid"></div>
+      <div class="cg" id="chartsGrid"></div>
     </div>
+  </div>
 
-    <!-- Input bar -->
-    <div class="input-bar" id="inputBar">
-      <div class="input-container">
-        <div class="input-box">
-          <textarea id="input" placeholder="Message Lyra..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}" oninput="autoResize(this)"></textarea>
-          <button class="send-btn" id="sendBtn" onclick="send()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-          </button>
-        </div>
-        <div class="input-info">Lyra can make mistakes. Trading advice is for informational purposes only.</div>
+  <div class="input-bar" id="inputBar">
+    <div class="input-wrap">
+      <div class="input-box">
+        <textarea id="input" placeholder="Message Lyra..." rows="1"></textarea>
+        <button id="sendBtn">↑</button>
       </div>
+      <div class="ii">Lyra can make mistakes. Trading advice is for informational purposes only.</div>
     </div>
   </div>
 </div>
 
 <script>
-const API = window.location.origin + '/api/chat';
-const CHART_API = window.location.origin + '/api/chart';
-let authToken = '';
-let history = [];
-let sending = false;
-let chartsLoaded = false;
-let hasMessages = false;
+var API = window.location.origin + '/api/chat';
+var CHART_API = window.location.origin + '/api/chart';
+var history = [];
+var sending = false;
 
-const loginScreen = document.getElementById('loginScreen');
-const app = document.getElementById('app');
-const authInput = document.getElementById('authInput');
-const loginError = document.getElementById('loginError');
-const chatContainer = document.getElementById('chatContainer');
-const welcome = document.getElementById('welcome');
-const inputEl = document.getElementById('input');
-const sendBtn = document.getElementById('sendBtn');
+var chatWrap = document.getElementById('chatWrap');
+var welcome = document.getElementById('welcome');
+var inputEl = document.getElementById('input');
+var sendBtn = document.getElementById('sendBtn');
+var chatArea = document.getElementById('chatArea');
 
+// Send button click
+sendBtn.addEventListener('click', function() { send(); });
 
-function doLogout() { location.reload(); }
-function newChat() { history = []; hasMessages = false; if (welcome) welcome.style.display = 'flex'; chatContainer.innerHTML = ''; chatContainer.appendChild(welcome); inputEl.focus(); switchView('chat', document.querySelector('.nav-item')); }
+// Enter key in input
+inputEl.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
 
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
+// Auto-resize
+inputEl.addEventListener('input', function() {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
+});
 
-function switchView(view, navEl) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (navEl) navEl.classList.add('active');
-  document.getElementById('chatArea').style.display = view === 'chat' ? 'flex' : 'none';
-  document.getElementById('chartsView').style.display = view === 'charts' ? 'block' : 'none';
-  document.getElementById('inputBar').style.display = view === 'chat' ? 'block' : 'none';
-  if (view === 'charts' && !chartsLoaded) loadCharts();
-}
+// Suggestion cards
+document.getElementById('sug1').addEventListener('click', function() { inputEl.value = 'What is the current gold price?'; send(); });
+document.getElementById('sug2').addEventListener('click', function() { inputEl.value = 'Show me active trades'; send(); });
+document.getElementById('sug3').addEventListener('click', function() { inputEl.value = 'Write a Python function to calculate Fibonacci numbers'; send(); });
+document.getElementById('sug4').addEventListener('click', function() { inputEl.value = 'Show me trade performance stats'; send(); });
 
-function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; }
+// Menu toggle
+document.getElementById('menuBtn').addEventListener('click', function() {
+  var sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.toggle('hidden');
+});
 
-// ── Simple markdown parser ──
-function parseMarkdown(text) {
-  let html = text;
-  // Code blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Headers
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Italic
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-  // Lists
-  html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
-  html = html.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li)/g, '<ul>$1</ul>');
-  // Tables
-  html = html.replace(/\|(.+)\|/g, (match) => {
-    const cells = match.split('|').filter(c => c.trim());
-    if (cells.every(c => /^[-:\s]+$/.test(c.trim()))) return '';
-    return '<tr>' + cells.map(c => `<td>${c.trim()}</td>`).join('') + '</tr>';
-  });
-  html = html.replace(/(<tr>[\s\S]*?<\/tr>)(?!\s*<tr)/g, '<table>$1</table>');
-  // Line breaks
-  html = html.replace(/\n/g, '<br>');
-  // Clean up extra brs around block elements
-  html = html.replace(/<br>(<h[1-3]>)/g, '$1');
-  html = html.replace(/(<\/h[1-3]>)<br>/g, '$1');
-  html = html.replace(/<br>(<pre>)/g, '$1');
-  html = html.replace(/(<\/pre>)<br>/g, '$1');
-  html = html.replace(/<br>(<ul>)/g, '$1');
-  html = html.replace(/(<\/ul>)<br>/g, '$1');
-  html = html.replace(/<br>(<table>)/g, '$1');
-  html = html.replace(/(<\/table>)<br>/g, '$1');
-  html = html.replace(/<br><br>/g, '</p><p>');
-  html = '<p>' + html + '</p>';
-  return html;
+// Markdown parser
+function parseMd(text) {
+  var h = text;
+  h = h.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  h = h.replace(/^\* (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/\n/g, '<br>');
+  h = h.replace(/<br><br>/g, '</p><p>');
+  h = '<p>' + h + '</p>';
+  return h;
 }
 
 function addMsg(text, role) {
   if (welcome) welcome.style.display = 'none';
-  hasMessages = true;
-  const div = document.createElement('div');
+  var div = document.createElement('div');
   div.className = 'msg';
-  const avatar = document.createElement('div');
-  avatar.className = 'msg-avatar ' + role;
-  avatar.textContent = role === 'user' ? 'SP' : '🎯';
-  const content = document.createElement('div');
-  content.className = 'msg-content';
-  content.innerHTML = role === 'assistant' ? parseMarkdown(text) : text.replace(/\n/g, '<br>');
-  div.appendChild(avatar);
+  var av = document.createElement('div');
+  av.className = 'ma ' + role;
+  av.textContent = role === 'user' ? 'SP' : '🎯';
+  var content = document.createElement('div');
+  content.className = 'mc';
+  if (role === 'assistant') {
+    content.innerHTML = parseMd(text);
+  } else {
+    content.textContent = text;
+  }
+  div.appendChild(av);
   div.appendChild(content);
-  chatContainer.appendChild(div);
-  chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  chatWrap.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
   return content;
 }
 
 function addTyping() {
   if (welcome) welcome.style.display = 'none';
-  const div = document.createElement('div');
-  div.className = 'typing'; div.id = 'typing';
-  div.innerHTML = '<div class="typing-avatar">🎯</div><div class="typing-dots"><span></span><span></span><span></span></div>';
-  chatContainer.appendChild(div);
-  chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  var div = document.createElement('div');
+  div.className = 'typing';
+  div.id = 'typing';
+  div.innerHTML = '<div class="ta">🎯</div><div class="td"><span></span><span></span><span></span></div>';
+  chatWrap.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
 }
 
-function removeTyping() { const el = document.getElementById('typing'); if (el) el.remove(); }
+function removeTyping() {
+  var el = document.getElementById('typing');
+  if (el) el.remove();
+}
 
-function askSkill(q) { switchView('chat', document.querySelector('.nav-item')); inputEl.value = q; send(); }
-
-async function send() {
+function send() {
   if (sending) return;
-  const message = inputEl.value.trim();
+  var message = inputEl.value.trim();
   if (!message) return;
-  sending = true; sendBtn.disabled = true; inputEl.value = ''; inputEl.style.height = 'auto';
+  sending = true;
+  sendBtn.disabled = true;
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  
   addMsg(message, 'user');
   history.push({ role: 'user', content: message });
   addTyping();
   
-  let retries = 0;
-  const maxRetries = 3;
+  var retries = 0;
+  var maxRetries = 3;
   
-  while (retries <= maxRetries) {
-    try {
-      const res = await fetch(API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, history: history.slice(-10), stream: true }),
-      });
-
-      // Handle rate limit (429) — auto retry
+  function doFetch() {
+    fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: message, history: history.slice(-10), stream: true })
+    }).then(function(res) {
       if (res.status === 429 && retries < maxRetries) {
         retries++;
-        const err = await res.json().catch(() => ({}));
-        // Update typing indicator with retry message
-        const typingEl = document.getElementById('typing');
-        if (typingEl) {
-          typingEl.innerHTML = '<div class="typing-avatar">🎯</div><div class="typing-dots"><span></span><span></span><span></span></div><span style="color:var(--muted);font-size:13px;align-self:center;margin-left:4px">Retrying (' + retries + '/3)...</span>';
-        }
-        await new Promise(r => setTimeout(r, 15000)); // Wait 15s before retry
-        continue;
+        var te = document.getElementById('typing');
+        if (te) te.innerHTML = '<div class="ta">🎯</div><span style="color:var(--muted);font-size:13px">Retrying (' + retries + '/3)...</span>';
+        setTimeout(doFetch, 15000);
+        return;
       }
-
-      if (!res.ok) { 
-        removeTyping(); 
-        try { const err = await res.json(); addMsg('⚠️ ' + (err.details || err.error || 'Server error'), 'assistant'); } catch { addMsg('⚠️ Server error. Please try again.', 'assistant'); }
-        history.pop(); return; 
+      if (!res.ok) {
+        removeTyping();
+        res.json().then(function(err) {
+          addMsg('⚠️ ' + (err.details || err.error || 'Server error'), 'assistant');
+        }).catch(function() {
+          addMsg('⚠️ Server error. Please try again.', 'assistant');
+        });
+        history.pop();
+        return;
       }
       
-      // Check if response is a stream or JSON
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
+      var ct = res.headers.get('content-type') || '';
+      if (ct.indexOf('application/json') !== -1) {
         removeTyping();
-        const data = await res.json();
-        if (data.error) { 
-          if (retries < maxRetries && data.error.includes('Rate')) {
-            retries++;
-            await new Promise(r => setTimeout(r, 15000));
-            addTyping();
-            continue;
+        res.json().then(function(data) {
+          if (data.error) {
+            if (retries < maxRetries && data.error.indexOf('Rate') !== -1) {
+              retries++;
+              addTyping();
+              setTimeout(doFetch, 15000);
+              return;
+            }
+            addMsg('⚠️ ' + (data.details || data.error), 'assistant');
+            history.pop();
+            return;
           }
-          addMsg('⚠️ ' + (data.details || data.error), 'assistant'); history.pop(); return; 
-        }
-        if (data.reply) { addMsg(data.reply, 'assistant'); history.push({ role: 'assistant', content: data.reply }); return; }
+          if (data.reply) {
+            addMsg(data.reply, 'assistant');
+            history.push({ role: 'assistant', content: data.reply });
+          }
+        });
+        return;
       }
       
       removeTyping();
-      const contentEl = addMsg('', 'assistant');
-    let fullText = '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const d = line.slice(6).trim();
-          if (d === '[DONE]') break;
-          try { const p = JSON.parse(d); 
-            if (p.error) { contentEl.innerHTML = '⚠️ Error: ' + (p.error || 'Unknown error'); return; }
-            if (p.content) { fullText += p.content; contentEl.innerHTML = parseMarkdown(fullText); chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' }); }
-          } catch {}
-        }
+      var contentEl = addMsg('', 'assistant');
+      var fullText = '';
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      
+      function readChunk() {
+        reader.read().then(function(result) {
+          if (result.done) {
+            if (!fullText) contentEl.innerHTML = '⚠️ No response received. Please try again.';
+            else history.push({ role: 'assistant', content: fullText });
+            sending = false;
+            sendBtn.disabled = false;
+            inputEl.focus();
+            return;
+          }
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (line.indexOf('data: ') === 0) {
+              var d = line.slice(6).trim();
+              if (d === '[DONE]') continue;
+              try {
+                var p = JSON.parse(d);
+                if (p.error) {
+                  contentEl.innerHTML = '⚠️ ' + p.error;
+                  sending = false;
+                  sendBtn.disabled = false;
+                  inputEl.focus();
+                  return;
+                }
+                if (p.content) {
+                  fullText += p.content;
+                  contentEl.innerHTML = parseMd(fullText);
+                  chatArea.scrollTop = chatArea.scrollHeight;
+                }
+              } catch(e) {}
+            }
+          }
+          readChunk();
+        });
       }
-    }
-    if (!fullText) { contentEl.innerHTML = '⚠️ No response received. Please try again.'; }
-    else history.push({ role: 'assistant', content: fullText });
-  } catch (err) { removeTyping(); addMsg('⚠️ Connection error: ' + err.message, 'assistant'); }
-  sending = false; sendBtn.disabled = false; inputEl.focus();
+      readChunk();
+    }).catch(function(err) {
+      removeTyping();
+      addMsg('⚠️ Connection error: ' + err.message, 'assistant');
+      sending = false;
+      sendBtn.disabled = false;
+      inputEl.focus();
+    });
+  }
+  
+  doFetch();
 }
 
-// ── Charts ──
-async function loadCharts() {
-  try {
-    const res = await fetch(CHART_API + '?type=all');
-
-    const data = await res.json();
+// Charts
+var chartsLoaded = false;
+function loadCharts() {
+  if (chartsLoaded) return;
+  fetch(CHART_API + '?type=all').then(function(res) { return res.json(); }).then(function(data) {
     document.getElementById('chartsLoading').style.display = 'none';
     document.getElementById('chartsContent').style.display = 'block';
     if (data.stats && data.stats.total > 0) {
-      const s = data.stats;
-      const stats = [
-        { label: 'Total Trades', value: s.total, class: 'gold' },
-        { label: 'Win Rate', value: s.winRate + '%', class: s.wins > s.losses ? 'green' : 'red' },
-        { label: 'Total PnL', value: s.totalPips + ' pips', class: parseFloat(s.totalPips) >= 0 ? 'green' : 'red' },
-        { label: 'Wins', value: s.wins, class: 'green' },
-        { label: 'Losses', value: s.losses, class: 'red' },
-        { label: 'Avg Win', value: s.avgWin, class: 'green' },
-        { label: 'Avg Loss', value: s.avgLoss, class: 'red' },
-        { label: 'Best Trade', value: s.bestTrade, class: 'green' },
-        { label: 'Worst Trade', value: s.worstTrade, class: 'red' },
+      var s = data.stats;
+      var stats = [
+        {l:'Total Trades',v:s.total,c:'go'},
+        {l:'Win Rate',v:s.winRate+'%',c:s.wins>s.losses?'g':'r'},
+        {l:'Total PnL',v:s.totalPips+' pips',c:parseFloat(s.totalPips)>=0?'g':'r'},
+        {l:'Wins',v:s.wins,c:'g'},
+        {l:'Losses',v:s.losses,c:'r'},
+        {l:'Avg Win',v:s.avgWin,c:'g'},
+        {l:'Avg Loss',v:s.avgLoss,c:'r'},
+        {l:'Best Trade',v:s.bestTrade,c:'g'},
+        {l:'Worst Trade',v:s.worstTrade,c:'r'}
       ];
-      document.getElementById('statsGrid').innerHTML = stats.map(st => `<div class="stat-card"><div class="label">${st.label}</div><div class="value ${st.class}">${st.value}</div></div>`).join('');
+      document.getElementById('statsGrid').innerHTML = stats.map(function(st){
+        return '<div class="stc"><div class="l">'+st.l+'</div><div class="v '+st.c+'">'+st.v+'</div></div>';
+      }).join('');
     } else {
-      document.getElementById('statsGrid').innerHTML = '<div class="stat-card"><div class="label">No Data</div><div class="value">No trades yet</div></div>';
+      document.getElementById('statsGrid').innerHTML = '<div class="stc"><div class="l">No Data</div><div class="v">No trades yet</div></div>';
     }
-    const charts = data.charts || {};
-    const grid = document.getElementById('chartsGrid');
-    const defs = [
-      { key: 'equity', title: '📈 Equity Curve (Cumulative PnL)' },
-      { key: 'winloss', title: '🏆 Win/Loss by Timeframe' },
-      { key: 'distribution', title: '📊 PnL Distribution' },
-      { key: 'price', title: '💰 Price History' },
-      { key: 'direction', title: '🔄 Buy/Sell Split' },
-      { key: 'confidence', title: '🤖 AI Confidence by Timeframe' },
-      { key: 'tp', title: '🎯 TP Hit Progress' },
+    var charts = data.charts || {};
+    var grid = document.getElementById('chartsGrid');
+    var defs = [
+      {k:'equity',t:'📈 Equity Curve'},
+      {k:'winloss',t:'🏆 Win/Loss by Timeframe'},
+      {k:'distribution',t:'📊 PnL Distribution'},
+      {k:'price',t:'💰 Price History'},
+      {k:'direction',t:'🔄 Buy/Sell Split'},
+      {k:'confidence',t:'🤖 AI Confidence'},
+      {k:'tp',t:'🎯 TP Hit Progress'}
     ];
-    defs.forEach(def => {
-      const cd = charts[def.key];
+    defs.forEach(function(def) {
+      var cd = charts[def.k];
       if (cd && cd.labels && cd.labels.length > 0) {
-        const div = document.createElement('div');
-        div.className = 'chart-card';
-        div.innerHTML = `<h3>${def.title}</h3><canvas id="chart_${def.key}"></canvas>`;
+        var div = document.createElement('div');
+        div.className = 'cc';
+        div.innerHTML = '<h3>'+def.t+'</h3><canvas id="c_'+def.k+'"></canvas>';
         grid.appendChild(div);
-        new Chart(document.getElementById('chart_' + def.key).getContext('2d'), {
+        new Chart(document.getElementById('c_'+def.k).getContext('2d'), {
           type: cd.type,
           data: { labels: cd.labels, datasets: cd.datasets },
-          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#ececec', font: { size: 11 } } } },
-            scales: cd.type === 'doughnut' ? {} : { x: { ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: '#424242' } }, y: { ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: '#424242' } } } } },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#ececec', font: { size: 11 } } } },
+            scales: cd.type === 'doughnut' ? {} : {
+              x: { ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: '#424242' } },
+              y: { ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: '#424242' } }
+            }
+          }
         });
       }
     });
     chartsLoaded = true;
-  } catch (err) { document.getElementById('chartsLoading').textContent = 'Error: ' + err.message; }
+  }).catch(function(err) {
+    document.getElementById('chartsLoading').textContent = 'Error: ' + err.message;
+  });
 }
 
 inputEl.focus();
