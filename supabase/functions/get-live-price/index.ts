@@ -1,55 +1,6 @@
-const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-
-async function fetchLivePrice(symbol = 'GC=F') {
-  try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=5m`;
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } });
-    if (!r.ok) return null;
-    const data = await r.json();
-    const result = data?.chart?.result?.[0];
-    if (!result) return null;
-    const meta = result.meta || {};
-    const price = meta.regularMarketPrice;
-    const prevClose = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPreviousClose || 0;
-    if (typeof price !== 'number' || price <= 0) return null;
-    const change = prevClose > 0 ? price - prevClose : 0;
-    const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
-    return { price, prevClose, change, changePct, marketState: meta.marketState || 'unknown', timestamp: meta.regularMarketTime || Math.floor(Date.now() / 1000) };
-  } catch (e) { return null; }
-}
-
-Deno.serve(async (req) => {
-  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
-
-  const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
-  const live = await fetchLivePrice('GC=F');
-  if (!live) return new Response(JSON.stringify({ success: false, error: 'Failed to fetch live price', timestamp: now }), { status: 503, headers });
-
-  let states: any = null, lastRun: string | null = null, lastTick: any = null;
-  try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/trading_states?select=*&limit=1`, {
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
-    });
-    const data = await r.json();
-    if (data && data.length > 0) {
-      states = data[0].states || {};
-      lastRun = data[0].last_run || null;
-      lastTick = states?.__ticks || null;
-    }
-  } catch (e) { console.error('Error loading state:', (e as Error).message); }
-
-  const activeTrades: any[] = [];
-  if (states) {
-    for (const key of Object.keys(states)) {
-      if (key === '__ticks') continue;
-      const s = states[key];
-      if (s && s.entry > 0 && !s.slHit && !s.allDone) {
-        activeTrades.push({ timeframe: key, direction: s.dir, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit, cycle: s.cycle, atr: s.atr });
-      }
-    }
-  }
-
-  return new Response(JSON.stringify({ success: true, timestamp: now, price: live.price, prevClose: live.prevClose, change: live.change, changePct: live.changePct, marketState: live.marketState, marketTime: live.timestamp, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length }), { status: 200, headers });
-});
+const SUPA_URL=Deno.env.get('SUPABASE_URL')!;const SUPA_KEY=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;const TD_KEY=Deno.env.get('TWELVE_DATA_API_KEY')||'';const GOLDAPI_KEY=Deno.env.get('GOLDAPI_KEY')||Deno.env.get('GOLDAPI_API_KEY')||'';const AV_KEY=Deno.env.get('ALPHA_VANTAGE_API_KEY')||'';const H={apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`};const CORS={'Content-Type':'application/json','Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,OPTIONS','Access-Control-Allow-Headers':'Content-Type'};
+async function td(){if(!TD_KEY)throw new Error('no TwelveData key');const r=await fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${encodeURIComponent(TD_KEY)}`,{cache:'no-store'});const d=await r.json();const p=Number(d?.price);if(!r.ok||!Number.isFinite(p)||p<=0)throw new Error(d?.message||'TwelveData failed');let prev=0;try{const q=await fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${encodeURIComponent(TD_KEY)}`,{cache:'no-store'});const x=await q.json();prev=Number(x?.previous_close)||0}catch{}return{price:p,prevClose:prev,source:'twelvedata'}}
+async function gold(){if(!GOLDAPI_KEY)throw new Error('no GoldAPI key');const r=await fetch('https://www.goldapi.io/api/XAU/USD',{headers:{'x-access-token':GOLDAPI_KEY,'Content-Type':'application/json'},cache:'no-store'});const d=await r.json();const p=Number(d?.price);if(!r.ok||!Number.isFinite(p)||p<=0)throw new Error('GoldAPI failed');return{price:p,prevClose:Number(d?.prev_close_price)||Number(d?.open_price)||0,source:'goldapi'}}
+async function av(){if(!AV_KEY)throw new Error('no Alpha Vantage key');const r=await fetch(`https://www.alphavantage.co/query?function=GOLD_SILVER_SPOT&symbol=GOLD&apikey=${encodeURIComponent(AV_KEY)}`,{cache:'no-store'});const d=await r.json();const p=Number(d?.price);if(!r.ok||!Number.isFinite(p)||p<=0)throw new Error('Alpha Vantage spot failed');return{price:p,prevClose:0,source:'alphavantage-spot'}}
+async function live(){try{return await td()}catch{}try{return await gold()}catch{}try{return await av()}catch{}return null}
+Deno.serve(async(req)=>{if(req.method==='OPTIONS')return new Response(null,{status:204,headers:CORS});const now=new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata',hour12:false});const livePx=await live();if(!livePx)return new Response(JSON.stringify({success:false,error:'XAU/USD spot unavailable',timestamp:now}),{status:503,headers:CORS});let states:any={},lastRun:any=null,lastTick:any=null;try{const r=await fetch(`${SUPA_URL}/rest/v1/trading_states?select=*&limit=1`,{headers:H});const d=await r.json();if(d?.length){states=d[0].states||{};lastRun=d[0].last_run||null;lastTick=states.__ticks||null}}catch{}const dbPrev=Number(states?.__prevClose?.value)||0;const prev=dbPrev||livePx.prevClose||0;const change=prev?livePx.price-prev:0;const changePct=prev?change/prev*100:0;const activeTrades:any[]=[];const allTimeframes:any[]=[];for(const tf of ['1M','5M','15M','30M','1H','4H']){const s=states[tf];if(!s){allTimeframes.push({timeframe:tf,status:'waiting',direction:null,entry:0,sl:0,tp1:0,tp2:0,tp3:0,tp1Hit:false,tp2Hit:false,tp3Hit:false,cycle:0,atr:0});continue}const status=s.allDone?'complete':s.slHit?'stopped':s.entry>0?'active':'waiting';const x={timeframe:tf,status,direction:s.dir||null,entry:Number(s.entry)||0,sl:Number(s.sl)||0,tp1:Number(s.tp1)||0,tp2:Number(s.tp2)||0,tp3:Number(s.tp3)||0,tp1Hit:!!s.tp1Hit,tp2Hit:!!s.tp2Hit,tp3Hit:!!s.tp3Hit,cycle:Number(s.cycle)||0,atr:Number(s.atr)||0};allTimeframes.push(x);if(status==='active')activeTrades.push(x)}let history:any[]=[];try{const r=await fetch(`${SUPA_URL}/rest/v1/alerts?select=id,type,timeframe,direction,entry,sl,tp,price,tp_num,tp_price,progress,cycle,created_at&order=created_at.desc&limit=20`,{headers:H});history=await r.json()}catch{}return new Response(JSON.stringify({success:true,symbol:'XAU/USD',price:livePx.price,prevClose:prev,change,changePct,marketState:'open',marketTime:Math.floor(Date.now()/1000),priceSource:'spot',spotProvider:livePx.source,lastMonitorRun:lastRun,lastTick,activeTrades,activeCount:activeTrades.length,allTimeframes,tradeHistory:history,targets:3}),{headers:CORS})})
