@@ -248,7 +248,6 @@ body::after{content:"";position:fixed;top:0;left:0;right:0;bottom:0;background-i
 .atr-vp.tp1{color:#39ff14}
 .atr-vp.tp2{color:#5fff14}
 .atr-vp.tp3{color:#a0ff14}
-.atr-vp.tp4{color:#d4ff14}
 .atr-vp.done{color:var(--neon-green)!important;text-decoration:line-through;opacity:.6}
 .atr-vp.pending{opacity:.4}
 .atr-vl.done-lbl{color:var(--neon-green)!important}
@@ -1179,7 +1178,7 @@ const ATR_TFS = [
 
 // Config
 const ATR_SL_MULT = 1.5;        // SL = ATR × 1.5
-const RR_VALUES = [1, 2, 3, 5, 8]; // TP1–TP5 risk-reward ratios
+const RR_VALUES = [1, 2, 3]; // TP1–TP3 risk-reward ratios
 
 // Persistent state per timeframe
 let atrState = {};
@@ -1195,9 +1194,9 @@ function loadATRState() {
 function initATRState(label) {
   if (!atrState[label]) {
     atrState[label] = {
-      entry: 0, sl: 0, tp1: 0, tp2: 0, tp3: 0, tp4: 0, tp5: 0,
+      entry: 0, sl: 0, tp1: 0, tp2: 0, tp3: 0,
       atr: 0, dir: 'long',
-      tp1Hit: false, tp2Hit: false, tp3Hit: false, tp4Hit: false, tp5Hit: false,
+      tp1Hit: false, tp2Hit: false, tp3Hit: false,
       slHit: false, allDone: false, cycle: 1,
       lastSignal: null  // Track previous signal to avoid consecutive duplicates
     };
@@ -1210,7 +1209,7 @@ function generateNewLevels(label, entry, atr, dir) {
   s.entry = entry;
   s.atr = atr;
   s.dir = dir;
-  s.tp1Hit = false; s.tp2Hit = false; s.tp3Hit = false; s.tp4Hit = false; s.tp5Hit = false;
+  s.tp1Hit = false; s.tp2Hit = false; s.tp3Hit = false;
   s.slHit = false; s.allDone = false;
   s.lastSignal = dir === 'long' ? 'buy' : 'sell';
 
@@ -1219,15 +1218,13 @@ function generateNewLevels(label, entry, atr, dir) {
     s.tp1 = entry + risk * RR_VALUES[0];
     s.tp2 = entry + risk * RR_VALUES[1];
     s.tp3 = entry + risk * RR_VALUES[2];
-    s.tp4 = entry + risk * RR_VALUES[3];
-    s.tp5 = entry + risk * RR_VALUES[4];
+
   } else {
     s.sl = entry + risk;
     s.tp1 = entry - risk * RR_VALUES[0];
     s.tp2 = entry - risk * RR_VALUES[1];
     s.tp3 = entry - risk * RR_VALUES[2];
-    s.tp4 = entry - risk * RR_VALUES[3];
-    s.tp5 = entry - risk * RR_VALUES[4];
+
   }
 }
 
@@ -1284,7 +1281,7 @@ async function updateATRPanel() {
                 direction: cross.signal,
                 entry: cross.close,
                 sl: s2.sl,
-                tp: { tp1: s2.tp1, tp2: s2.tp2, tp3: s2.tp3, tp4: s2.tp4, tp5: s2.tp5 },
+                tp: { tp1: s2.tp1, tp2: s2.tp2, tp3: s2.tp3 },
                 cycle: s.cycle,
                 price: currentPrice
               })
@@ -1329,14 +1326,12 @@ async function updateATRPanel() {
             if (!s.tp1Hit && checkHit(currentPrice, s.tp1, s.dir)) { s.tp1Hit = true; if (!prev.tp1) { soundTP(); waAlert({ type:'tp', timeframe:tf.label, tpNum:1, tp:s.tp1, price:currentPrice, progress:1 }); } }
             if (s.tp1Hit && !s.tp2Hit && checkHit(currentPrice, s.tp2, s.dir)) { s.tp2Hit = true; if (!prev.tp2) { soundTP(); waAlert({ type:'tp', timeframe:tf.label, tpNum:2, tp:s.tp2, price:currentPrice, progress:2 }); } }
             if (s.tp2Hit && !s.tp3Hit && checkHit(currentPrice, s.tp3, s.dir)) { s.tp3Hit = true; if (!prev.tp3) { soundTP(); waAlert({ type:'tp', timeframe:tf.label, tpNum:3, tp:s.tp3, price:currentPrice, progress:3 }); } }
-            if (s.tp3Hit && !s.tp4Hit && checkHit(currentPrice, s.tp4, s.dir)) { s.tp4Hit = true; if (!prev.tp4) { soundTP(); waAlert({ type:'tp', timeframe:tf.label, tpNum:4, tp:s.tp4, price:currentPrice, progress:4 }); } }
-            if (s.tp4Hit && !s.tp5Hit && checkHit(currentPrice, s.tp5, s.dir)) { s.tp5Hit = true; if (!prev.tp5) { soundTP(); waAlert({ type:'tp', timeframe:tf.label, tpNum:5, tp:s.tp5, price:currentPrice, progress:5 }); } }
           }
 
-          if (s.tp1Hit && s.tp2Hit && s.tp3Hit && s.tp4Hit && s.tp5Hit) {
+          if (s.tp1Hit && s.tp2Hit && s.tp3Hit) {
             if (!s.allDone) { s.allDone = true; if (!prev.allDone) { soundAllDone(); waAlert({ type:'alldone', timeframe:tf.label, entry:s.entry, cycle:s.cycle, price:currentPrice }); } }
           }
-          prevHitStates[key] = {tp1:s.tp1Hit,tp2:s.tp2Hit,tp3:s.tp3Hit,tp4:s.tp4Hit,tp5:s.tp5Hit,slHit:s.slHit,allDone:s.allDone};
+          prevHitStates[key] = {tp1:s.tp1Hit,tp2:s.tp2Hit,tp3:s.tp3Hit,slHit:s.slHit,allDone:s.allDone};
         }
 
         // === RENDER CARD ===
@@ -1349,14 +1344,12 @@ async function updateATRPanel() {
         let badgeClass = 'active', badgeText = '🔵 ACTIVE';
         if (s.slHit) { badgeClass = 'waiting'; badgeText = '🔥 SL HIT · WAITING EMA CROSS'; }
         else if (s.allDone) { badgeClass = 'alldone'; badgeText = '🔥🔥 ALL 5 DONE · WAITING CROSS'; }
-        else if (s.tp5Hit) { badgeClass = 'tphit'; badgeText = '🔥 5/5 TP'; }
-        else if (s.tp4Hit) { badgeClass = 'tphit'; badgeText = '🔥 4/5 TP'; }
-        else if (s.tp3Hit) { badgeClass = 'tphit'; badgeText = '🔥 3/5 TP'; }
-        else if (s.tp2Hit) { badgeClass = 'tphit'; badgeText = '🔥 2/5 TP'; }
-        else if (s.tp1Hit) { badgeClass = 'tphit'; badgeText = '🔥 1/5 TP'; }
+        else if (s.tp3Hit) { badgeClass = 'tphit'; badgeText = '🔥 3/3 TP'; }
+        else if (s.tp2Hit) { badgeClass = 'tphit'; badgeText = '🔥 2/3 TP'; }
+        else if (s.tp1Hit) { badgeClass = 'tphit'; badgeText = '🔥 1/3 TP'; }
 
         // Progress bar
-        const hitCount = (s.tp1Hit?1:0) + (s.tp2Hit?1:0) + (s.tp3Hit?1:0) + (s.tp4Hit?1:0) + (s.tp5Hit?1:0);
+        const hitCount = (s.tp1Hit?1:0) + (s.tp2Hit?1:0) + (s.tp3Hit?1:0);
         const progressPct = (hitCount / 5) * 100;
 
         // Hit indicators
@@ -1400,8 +1393,6 @@ async function updateATRPanel() {
             ${rowHtml('TP1 (1R)', s.tp1, s.tp1Hit, 'tp1', !s.tp1Hit && !s.slHit)}
             ${rowHtml('TP2 (2R)', s.tp2, s.tp2Hit, 'tp2', s.tp1Hit && !s.tp2Hit && !s.slHit)}
             ${rowHtml('TP3 (3R)', s.tp3, s.tp3Hit, 'tp3', s.tp2Hit && !s.tp3Hit && !s.slHit)}
-            ${rowHtml('TP4 (5R)', s.tp4, s.tp4Hit, 'tp4', s.tp3Hit && !s.tp4Hit && !s.slHit)}
-            ${rowHtml('TP5 (8R)', s.tp5, s.tp5Hit, 'tp5', s.tp4Hit && !s.tp5Hit && !s.slHit)}
             <div class="atr-val-row" style="border-top:1px solid var(--border-dim);margin-top:1px;padding-top:2px">
               <span class="atr-vl">LIVE PRICE</span><span class="atr-vp" style="color:var(--neon-cyan)">${fmt(currentPrice)}</span>
             </div>
@@ -1579,9 +1570,8 @@ async function pollBackendTicks() {
             // Full sync if cycle changed or no entry
             current[tf] = {
               entry: trade.entry, sl: trade.sl, atr: trade.atr, dir: trade.direction,
-              tp1: trade.tp1, tp2: trade.tp2, tp3: trade.tp3, tp4: trade.tp4, tp5: trade.tp5,
+              tp1: trade.tp1, tp2: trade.tp2, tp3: trade.tp3,
               tp1Hit: trade.tp1Hit, tp2Hit: trade.tp2Hit, tp3Hit: trade.tp3Hit,
-              tp4Hit: trade.tp4Hit, tp5Hit: trade.tp5Hit,
               slHit: false, allDone: false, cycle: trade.cycle,
               lastSignal: trade.direction === 'long' ? 'buy' : 'sell'
             };
@@ -1591,8 +1581,6 @@ async function pollBackendTicks() {
             current[tf].tp1Hit = trade.tp1Hit;
             current[tf].tp2Hit = trade.tp2Hit;
             current[tf].tp3Hit = trade.tp3Hit;
-            current[tf].tp4Hit = trade.tp4Hit;
-            current[tf].tp5Hit = trade.tp5Hit;
           }
         }
         localStorage.setItem('xau_atr_state', JSON.stringify(current));
@@ -1623,7 +1611,7 @@ async function init() {
 
   // === BACKEND STATE SYNC — Gold Sniper ===
   // Seed latest backend trading state into localStorage on page load
-  const BACKEND_SEED_STATE = {"1M": {"entry": 4022.6, "sl": 4025.59, "atr": 1.99, "dir": "short", "tp1": 4019.61, "tp2": 4016.62, "tp3": 4013.63, "tp4": 4007.65, "tp5": 3998.69, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 4, "lastSignal": "sell"}, "5M": {"entry": 4018.1, "sl": 4013.18, "atr": 3.28, "dir": "long", "tp1": 4023.02, "tp2": 4027.94, "tp3": 4032.85, "tp4": 4042.69, "tp5": 4057.44, "tp1Hit": false, "tp2Hit": false, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 4, "lastSignal": "buy"}, "15M": {"entry": 4005.1, "sl": 3986.61, "atr": 12.33, "dir": "long", "tp1": 4023.59, "tp2": 4042.09, "tp3": 4060.58, "tp4": 4097.56, "tp5": 4153.04, "tp1Hit": true, "tp2Hit": false, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 3, "lastSignal": "buy"}, "1H": {"entry": 4036.9, "sl": 4064.9, "atr": 18.66, "dir": "short", "tp1": 4008.9, "tp2": 3980.91, "tp3": 3952.91, "tp4": 3896.92, "tp5": 3812.93, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 1, "lastSignal": "sell"}, "4H": {"entry": 4109.6, "sl": 4167.64, "atr": 38.69, "dir": "short", "tp1": 4051.56, "tp2": 3993.52, "tp3": 3935.48, "tp4": 3819.4, "tp5": 3645.29, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "tp4Hit": false, "tp5Hit": false, "slHit": false, "allDone": false, "cycle": 1, "lastSignal": "sell"}};
+  const BACKEND_SEED_STATE = {"1M": {"entry": 4022.6, "sl": 4025.59, "atr": 1.99, "dir": "short", "tp1": 4019.61, "tp2": 4016.62, "tp3": 4013.63, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "slHit": false, "allDone": false, "cycle": 4, "lastSignal": "sell"}, "5M": {"entry": 4018.1, "sl": 4013.18, "atr": 3.28, "dir": "long", "tp1": 4023.02, "tp2": 4027.94, "tp3": 4032.85, "tp1Hit": false, "tp2Hit": false, "tp3Hit": false, "slHit": false, "allDone": false, "cycle": 4, "lastSignal": "buy"}, "15M": {"entry": 4005.1, "sl": 3986.61, "atr": 12.33, "dir": "long", "tp1": 4023.59, "tp2": 4042.09, "tp3": 4060.58, "tp1Hit": true, "tp2Hit": false, "tp3Hit": false, "slHit": false, "allDone": false, "cycle": 3, "lastSignal": "buy"}, "1H": {"entry": 4036.9, "sl": 4064.9, "atr": 18.66, "dir": "short", "tp1": 4008.9, "tp2": 3980.91, "tp3": 3952.91, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "slHit": false, "allDone": false, "cycle": 1, "lastSignal": "sell"}, "4H": {"entry": 4109.6, "sl": 4167.64, "atr": 38.69, "dir": "short", "tp1": 4051.56, "tp2": 3993.52, "tp3": 3935.48, "tp1Hit": true, "tp2Hit": true, "tp3Hit": false, "slHit": false, "allDone": false, "cycle": 1, "lastSignal": "sell"}};
   (function syncBackendState() {
     try {
       const existing = localStorage.getItem('xau_atr_state');

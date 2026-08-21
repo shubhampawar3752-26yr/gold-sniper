@@ -4,7 +4,7 @@
 // ONE Edge Function that:
 //   1. Fetches XAUUSD spot price + EMA/ATR/RSI from TradingView (one HTTP call)
 //   2. Runs EMA 9/21 crossover signal engine across 6 timeframes
-//   3. Sets SL (2x ATR) and 5 TPs (2x, 4x, 6x, 10x, 16x ATR)
+//   3. Sets SL (2x ATR) and 3 TPs (2x, 4x, 6x ATR)
 //   4. Checks TP/SL hits on each tick
 //   5. Sends WhatsApp alerts directly (Meta API + Blueticks fallback)
 //   6. Saves state + alerts + execution logs to Supabase
@@ -15,7 +15,7 @@
 
 // ── Constants ──
 const ATR_SL_MULT = 2;          // SL = 2x ATR
-const RR = [1, 2, 3, 5, 8];     // TP1=1R(2xATR) TP2=2R(4xATR) TP3=3R(6xATR) TP4=5R(10xATR) TP5=8R(16xATR)
+const RR = [1, 2, 3];           // TP1=1R(2xATR) TP2=2R(4xATR) TP3=3R(6xATR)
 const TICKS = 3;                // 3 ticks per run
 const TICK_MS = 10000;          // 10s between ticks
 const TV_SYMBOL = 'OANDA:XAUUSD';
@@ -73,8 +73,8 @@ function isSLHit(p: number, s: number, d: string) { return d === 'long' ? p <= s
 
 function ns() {
   return {
-    entry: 0, sl: 0, tp1: 0, tp2: 0, tp3: 0, tp4: 0, tp5: 0, atr: 0, dir: 'long',
-    tp1Hit: false, tp2Hit: false, tp3Hit: false, tp4Hit: false, tp5Hit: false,
+    entry: 0, sl: 0, tp1: 0, tp2: 0, tp3: 0, atr: 0, dir: 'long',
+    tp1Hit: false, tp2Hit: false, tp3Hit: false,
     slHit: false, allDone: false, cycle: 0, lastSignal: null,
     prevEma9: null as number | null, prevEma21: null as number | null,
     lastFlipTime: null as string | null,
@@ -88,8 +88,6 @@ function setLevels(s: any, a: number) {
   s.tp1 = s.dir === 'long' ? s.entry + r * RR[0] : s.entry - r * RR[0];
   s.tp2 = s.dir === 'long' ? s.entry + r * RR[1] : s.entry - r * RR[1];
   s.tp3 = s.dir === 'long' ? s.entry + r * RR[2] : s.entry - r * RR[2];
-  s.tp4 = s.dir === 'long' ? s.entry + r * RR[3] : s.entry - r * RR[3];
-  s.tp5 = s.dir === 'long' ? s.entry + r * RR[4] : s.entry - r * RR[4];
 }
 
 function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
@@ -105,10 +103,7 @@ function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
   if (!s.tp1Hit && hit(px, s.tp1, s.dir)) { s.tp1Hit = true; if (!prev.tp1) al.push({ type: 'tp', timeframe: l, tp_num: 1, tp_price: s.tp1, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 1, sent: false }); }
   if (s.tp1Hit && !s.tp2Hit && hit(px, s.tp2, s.dir)) { s.tp2Hit = true; if (!prev.tp2) al.push({ type: 'tp', timeframe: l, tp_num: 2, tp_price: s.tp2, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 2, sent: false }); }
   if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) { s.tp3Hit = true; if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 3, sent: false }); }
-  if (s.tp3Hit && !s.tp4Hit && hit(px, s.tp4, s.dir)) { s.tp4Hit = true; if (!prev.tp4) al.push({ type: 'tp', timeframe: l, tp_num: 4, tp_price: s.tp4, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 4, sent: false }); }
-  if (s.tp4Hit && !s.tp5Hit && hit(px, s.tp5, s.dir)) { s.tp5Hit = true; if (!prev.tp5) al.push({ type: 'tp', timeframe: l, tp_num: 5, tp_price: s.tp5, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 5, sent: false }); }
-  
-  if (s.tp1Hit && s.tp2Hit && s.tp3Hit && s.tp4Hit && s.tp5Hit) {
+  if (s.tp1Hit && s.tp2Hit && s.tp3Hit) {
     if (!prev.allDone) { s.allDone = true; al.push({ type: 'alldone', timeframe: l, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, sent: false }); }
   }
 }
@@ -304,8 +299,6 @@ function formatMessage(alert: any): string {
 TP1: $${tp.tp1?.toFixed(2) || '?'} (1R)
 TP2: $${tp.tp2?.toFixed(2) || '?'} (2R)
 TP3: $${tp.tp3?.toFixed(2) || '?'} (3R)
-TP4: $${tp.tp4?.toFixed(2) || '?'} (5R)
-TP5: $${tp.tp5?.toFixed(2) || '?'} (8R)
 
 ${tp.aiConfirmed ? `AI: ${tp.aiReason} ${tp.aiPattern ? '(' + tp.aiPattern + ')' : ''}` : ''}
 _Gold Sniper Engine_`;
@@ -318,7 +311,7 @@ _Gold Sniper Engine_`;
 *Entry:* $${alert.entry?.toFixed(2)}
 *Current Price:* $${alert.price?.toFixed(2)}
 
-_Cycle ${alert.cycle} — ${alert.progress}/5 TPs hit_
+_Cycle ${alert.cycle} — ${alert.progress}/3 TPs hit_
 _Gold Sniper Engine_`;
   }
 
@@ -339,7 +332,7 @@ _Gold Sniper Engine_`;
 *Entry:* $${alert.entry?.toFixed(2)}
 *Current Price:* $${alert.price?.toFixed(2)}
 
-*All 5 TP targets reached!*
+*All 3 TP targets reached!*
 _Cycle ${alert.cycle} — Perfect trade_
 _Gold Sniper Engine_`;
   }
@@ -401,23 +394,13 @@ Deno.serve(async (req) => {
     if (rows && rows.length > 0) { sid = rows[0].id; states = rows[0].states || {}; prev = rows[0].prev_hits || {}; }
   } catch (e) { errors.push(`State load: ${(e as Error).message}`); }
 
-  // ── Fixup: recalculate TP4/TP5 for existing active trades (migration from 3-TP engine) ──
+  // ── Fixup: clear stale tp4/tp5 from 5-TP era for existing active trades ──
   for (const tf of TFS) {
     const s = states[tf.l];
-    if (!s || s.entry === 0 || s.slHit || s.allDone) continue;
-    const a = s.atr || 0;
-    if (a <= 0) continue;
-    const r = a * ATR_SL_MULT;
-    const needsFix = s.tp4 === 0 || s.tp5 === 0 ||
-      (s.dir === 'long' && (s.tp4 < s.entry || s.tp5 < s.entry)) ||
-      (s.dir === 'short' && (s.tp4 > s.entry || s.tp5 > s.entry));
-    if (needsFix) {
-      s.tp4 = s.dir === 'long' ? s.entry + r * RR[3] : s.entry - r * RR[3];
-      s.tp5 = s.dir === 'long' ? s.entry + r * RR[4] : s.entry - r * RR[4];
-      if (!s.tp4Hit) s.tp4Hit = false;
-      if (!s.tp5Hit) s.tp5Hit = false;
-      errors.push(`TP4/TP5 fixup: ${tf.l} recalc tp4=$${s.tp4.toFixed(2)} tp5=$${s.tp5.toFixed(2)}`);
-    }
+    if (!s || s.entry === 0) continue;
+    if (s.tp4 !== undefined) { s.tp4 = 0; s.tp4Hit = false; }
+    if (s.tp5 !== undefined) { s.tp5 = 0; s.tp5Hit = false; }
+    if (s.allDone && s.tp3Hit && !s.tp1Hit) s.allDone = false; // reset allDone if it was set by 5-TP
   }
 
   // ── Fetch TradingView indicators (ONE HTTP call) ──
@@ -494,7 +477,7 @@ Deno.serve(async (req) => {
       s.entry = tfPrice || livePrice || 0;
       s.atr = atr;
       s.lastSignal = signal;
-      s.tp1Hit = s.tp2Hit = s.tp3Hit = s.tp4Hit = s.tp5Hit = false;
+      s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
       s.slHit = s.allDone = false;
       setLevels(s, atr);
 
@@ -508,7 +491,7 @@ Deno.serve(async (req) => {
         alerts.push({
           type: 'entry', timeframe: l, direction: signal,
           entry: s.entry, sl: s.sl,
-          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
+          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
           cycle: s.cycle, price: tfPrice, sent: false,
         });
       }
@@ -529,7 +512,7 @@ Deno.serve(async (req) => {
         s.cycle++;
         s.entry = tfPrice || livePrice || 0;
         s.atr = atr;
-        s.tp1Hit = s.tp2Hit = s.tp3Hit = s.tp4Hit = s.tp5Hit = false;
+        s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
         s.slHit = s.allDone = false;
         s.lastSignal = crossUp ? 'buy' : 'sell';
         setLevels(s, atr);
@@ -544,7 +527,7 @@ Deno.serve(async (req) => {
           alerts.push({
             type: 'entry', timeframe: l, direction: s.lastSignal,
             entry: s.entry, sl: s.sl,
-            tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
+            tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
             cycle: s.cycle, price: tfPrice, sent: false,
           });
         }
@@ -560,9 +543,9 @@ Deno.serve(async (req) => {
 
     tfResults.push({
       tf: l, ema9, ema21, signal: ema9 > ema21 ? 'buy' : 'sell', atr, rsi,
-      entry: s.entry, sl: s.sl, tps: [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5],
+      entry: s.entry, sl: s.sl, tps: [s.tp1, s.tp2, s.tp3],
       cycle: s.cycle, dir: s.dir, slHit: s.slHit, allDone: s.allDone,
-      tpHits: [s.tp1Hit, s.tp2Hit, s.tp3Hit, s.tp4Hit, s.tp5Hit],
+      tpHits: [s.tp1Hit, s.tp2Hit, s.tp3Hit],
       aiConfirmed: s.aiConfirmed, aiReason: s.aiReason,
     });
   }
@@ -612,7 +595,7 @@ Deno.serve(async (req) => {
   for (const tf of TFS) {
     const s = states[tf.l];
     newPrev[tf.l] = {
-      tp1: s.tp1Hit, tp2: s.tp2Hit, tp3: s.tp3Hit, tp4: s.tp4Hit, tp5: s.tp5Hit,
+      tp1: s.tp1Hit, tp2: s.tp2Hit, tp3: s.tp3Hit,
       slHit: s.slHit, allDone: s.allDone,
     };
   }

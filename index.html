@@ -338,7 +338,7 @@ async function fetchD() {
         const st = t.status || 'waiting', dir = t.direction;
         const sigClass = st === 'active' ? dc(dir) : st;
         const sigText = st === 'active' ? dl(dir) : st === 'waiting' ? 'WAITING' : st.toUpperCase();
-        const dots = [t.tp1Hit, t.tp2Hit, t.tp3Hit, t.tp4Hit, t.tp5Hit].map(h => '<div class="tf-dot ' + (h ? 'hit' : '') + '"></div>').join('');
+        const dots = [t.tp1Hit, t.tp2Hit, t.tp3Hit].map(h => '<div class="tf-dot ' + (h ? 'hit' : '') + '"></div>').join('');
         return '<div class="tf-card ' + st + (dir ? ' ' + dc(dir) : '') + '"><div class="tf-label">' + t.timeframe + '</div><div class="tf-signal ' + sigClass + '">' + sigText + '</div><div class="tf-dots">' + dots + '</div><div class="tf-cycle">Cycle #' + (t.cycle || '—') + '</div><div class="tf-entry">' + (t.entry > 0 ? '$' + fmt(t.entry) : '—') + '</div></div>';
       }).join('');
     }
@@ -352,7 +352,7 @@ async function fetchD() {
     } else {
       grid.innerHTML = trades.map(t => {
         const d = dc(t.direction);
-        const tps = [{l:'TP1',p:t.tp1,h:t.tp1Hit},{l:'TP2',p:t.tp2,h:t.tp2Hit},{l:'TP3',p:t.tp3,h:t.tp3Hit},{l:'TP4',p:t.tp4,h:t.tp4Hit},{l:'TP5',p:t.tp5,h:t.tp5Hit}];
+        const tps = [{l:'TP1',p:t.tp1,h:t.tp1Hit},{l:'TP2',p:t.tp2,h:t.tp2Hit},{l:'TP3',p:t.tp3,h:t.tp3Hit}];
         const hc = tps.filter(x => x.h === true).length;
         const th = tps.map(tp => '<div class="tp-item ' + (tp.h ? 'hit' : 'pending') + '"><div class="tp-label">' + tp.l + (tp.h ? ' ✓' : '') + '</div><div class="tp-price">' + (tp.p > 0 ? fmt(tp.p) : '—') + '</div></div>').join('');
         const pct = (hc / 5) * 100;
