@@ -413,9 +413,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // Auth check
-  if (!checkAuth(req)) {
-    return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or missing auth token' });
-  }
+  // Auth removed — open access
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
