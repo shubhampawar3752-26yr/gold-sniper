@@ -311,11 +311,11 @@ function doLogin() {
   const token = authInput.value.trim();
   if (!token) { loginError.textContent = 'Please enter your access token'; return; }
   loginError.textContent = 'Connecting...';
-  fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': token }, body: JSON.stringify({ message: 'test', history: [] }) })
+  fetch(window.location.origin + '/api/auth', { method: 'GET', headers: { 'X-Auth-Token': token } })
     .then(res => {
       if (res.status === 401) { loginError.textContent = 'Invalid token'; authInput.value = ''; }
       else if (res.ok) { authToken = token; sessionStorage.setItem('gs_agent_token', token); showApp(); }
-      else { loginError.textContent = 'Server error'; }
+      else { loginError.textContent = 'Server error (' + res.status + ')'; }
     }).catch(() => { loginError.textContent = 'Connection error'; });
 }
 
