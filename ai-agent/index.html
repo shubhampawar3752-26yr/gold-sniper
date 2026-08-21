@@ -124,18 +124,6 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -appl
 .chart-card canvas { max-height: 250px; }
 .loading { text-align: center; padding: 40px; color: var(--muted); }
 
-/* ── Login ── */
-.login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 20px; width: 100%; }
-.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 40px; width: 340px; text-align: center; }
-.login-logo { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 22px; margin: 0 auto 16px; }
-.login-card h1 { font-size: 22px; margin-bottom: 8px; }
-.login-card p { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
-.login-input { width: 100%; padding: 12px 16px; background: var(--input-bg); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-size: 14px; outline: none; text-align: center; }
-.login-input:focus { border-color: var(--muted); }
-.login-btn { width: 100%; padding: 12px; background: var(--accent); color: #fff; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; font-size: 14px; margin-top: 12px; transition: background 0.15s; }
-.login-btn:hover { background: var(--accent-hover); }
-.login-error { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 8px; }
-
 /* Mobile */
 @media (max-width: 768px) {
   .sidebar { position: absolute; z-index: 100; height: 100vh; }
@@ -154,20 +142,8 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -appl
 </head>
 <body>
 
-<!-- ── Login ── -->
-<div class="login-screen" id="loginScreen" style="display:none">
-  <div class="login-card">
-    <div class="login-logo">🎯</div>
-    <h1>Lyra AI</h1>
-    <p>Enter your access token to continue</p>
-    <input type="password" class="login-input" id="authInput" placeholder="Access token" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="login-btn" onclick="doLogin()">Continue</button>
-    <div class="login-error" id="loginError"></div>
-  </div>
-</div>
-
 <!-- ── App ── -->
-<div style="display:none;width:100%;height:100vh" id="app">
+<div style="display:flex;width:100%;height:100vh" id="app">
 
   <!-- Sidebar -->
   <div class="sidebar" id="sidebar">
@@ -224,10 +200,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -appl
       </div>
     </div>
     <div class="sidebar-bottom">
-      <div class="sidebar-btn" onclick="doLogout()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
-        Logout
-      </div>
+
     </div>
   </div>
 
@@ -290,7 +263,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -appl
 <script>
 const API = window.location.origin + '/api/chat';
 const CHART_API = window.location.origin + '/api/chart';
-let authToken = sessionStorage.getItem('gs_agent_token') || '';
+let authToken = '';
 let history = [];
 let sending = false;
 let chartsLoaded = false;
@@ -305,22 +278,8 @@ const welcome = document.getElementById('welcome');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
 
-showApp(); // Auth removed — skip login
 
-function doLogin() {
-  const token = authInput.value.trim();
-  if (!token) { loginError.textContent = 'Please enter your access token'; return; }
-  loginError.textContent = 'Connecting...';
-  fetch(window.location.origin + '/api/auth', { method: 'GET', headers: { 'X-Auth-Token': token } })
-    .then(res => {
-      if (res.status === 401) { loginError.textContent = 'Invalid token'; authInput.value = ''; }
-      else if (res.ok) { authToken = token; sessionStorage.setItem('gs_agent_token', token); showApp(); }
-      else { loginError.textContent = 'Server error (' + res.status + ')'; }
-    }).catch(() => { loginError.textContent = 'Connection error'; });
-}
-
-function showApp() { loginScreen.style.display = 'none'; app.style.display = 'flex'; inputEl.focus(); }
-function doLogout() { sessionStorage.removeItem('gs_agent_token'); authToken = ''; location.reload(); }
+function doLogout() { location.reload(); }
 function newChat() { history = []; hasMessages = false; if (welcome) welcome.style.display = 'flex'; chatContainer.innerHTML = ''; chatContainer.appendChild(welcome); inputEl.focus(); switchView('chat', document.querySelector('.nav-item')); }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
@@ -423,10 +382,10 @@ async function send() {
   try {
     const res = await fetch(API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, history: history.slice(-10), stream: true }),
     });
-    if (res.status === 401) { removeTyping(); doLogout(); return; }
+
     if (!res.ok) { removeTyping(); const err = await res.json(); addMsg('⚠️ Error: ' + (err.details || err.error || 'Unknown error'), 'assistant'); history.pop(); return; }
     removeTyping();
     const contentEl = addMsg('', 'assistant');
@@ -456,8 +415,8 @@ async function send() {
 // ── Charts ──
 async function loadCharts() {
   try {
-    const res = await fetch(CHART_API + '?type=all', { headers: { 'X-Auth-Token': authToken } });
-    if (res.status === 401) { doLogout(); return; }
+    const res = await fetch(CHART_API + '?type=all', { {} });
+
     const data = await res.json();
     document.getElementById('chartsLoading').style.display = 'none';
     document.getElementById('chartsContent').style.display = 'block';
