@@ -9,7 +9,13 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL = 'openai/gpt-oss-120b';
 
-const SYSTEM_PROMPT = `You are Lyra — Shubham's personal AI trading assistant for the Gold Sniper project.
+const SYSTEM_PROMPT = `You are Lyra — Shubham's personal AI assistant. You have TWO modes:
+
+## Mode 1: General Assistant (like ChatGPT)
+Answer ANY question naturally — coding, math, science, writing, translation, explanations, brainstorming, recipes, trivia, advice, etc. Be helpful, concise, and conversational. Format responses with markdown when useful (tables, lists, code blocks, bold). When no trading intent is detected, respond as a general AI assistant.
+
+## Mode 2: Gold Sniper Trading Assistant
+When the user asks about gold prices, trades, alerts, patterns, or trading performance, activate your trading skills. Gold Sniper is an EMA 9/21 crossover gold (XAU/USD) trading system with ATR-based SL/TP levels across 6 timeframes (1M, 5M, 15M, 30M, 1H, 4H).
 
 Gold Sniper is an EMA 9/21 crossover gold (XAU/USD) trading system with ATR-based SL/TP levels across 6 timeframes (1M, 5M, 15M, 30M, 1H, 4H).
 
@@ -68,6 +74,8 @@ When the user asks you to:
 Be concise, friendly, and direct. Use IST timezone. Format prices with $.`;
 
 // ── Auth check ──
+const LIGHTWEIGHT_PROMPT = `You are Lyra — a helpful AI assistant (like ChatGPT). Answer any question naturally and concisely. Use markdown formatting when useful (tables, lists, code blocks, bold). Be friendly, direct, and helpful.`;
+
 function checkAuth(req) {
   if (!AUTH_TOKEN) return true; // No token set = open access
   const authHeader = req.headers['x-auth-token'] || req.headers['authorization'] || '';
@@ -220,6 +228,8 @@ function detectIntent(message) {
   if (msg.match(/tp.*hit|take profit/) || msg.match(/sl.*hit|stop loss/)) intents.push('active_trades');
   if (msg.match(/insert|add.*record|create.*record|update.*record|delete.*record|query.*table|database|db /)) intents.push('database');
   if (msg.match(/edit.*html|edit.*css|change.*color|change.*layout|update.*dashboard|modify.*page|edit.*file|fix.*css|style/)) intents.push('editor');
+  // If no specific intent detected, it's a general question (ChatGPT mode)
+  if (intents.length === 0) intents.push('general');
   return intents;
 }
 
@@ -232,7 +242,7 @@ async function buildContext(userMessage) {
   if (memories && memories.length > 0) {
     parts.push(`=== AGENT MEMORY (${memories.length} entries) ===\n${memories.map(m => `[${m.category}/${m.kind}] ${m.content}`).join('\n')}`);
   }
-  if (intents.includes('live_price') || intents.includes('active_trades') || intents.length === 0) {
+  if (intents.includes('live_price') || intents.includes('active_trades')) {
     const trading = await getTradingData();
     if (trading) {
       parts.push(`=== LIVE DATA ===\nGold Spot: $${trading.spotPrice || trading.price || 'N/A'}\nChange: ${trading.change || 'N/A'} (${trading.changePct || 'N/A'}%)`);
@@ -291,6 +301,10 @@ async function buildContext(userMessage) {
   if (intents.includes('editor')) {
     actions.push('editor');
     parts.push('=== HTML/CSS EDITOR READY ===\nUser wants to edit HTML/CSS. Ask which file to edit if not specified. Available files: index.html (dashboard), ai-agent/index.html (AI agent UI), styles.css, etc. Use /api/editor to read and modify files. ALWAYS preview before applying.');
+  }
+  if (intents.includes('general')) {
+    // General ChatGPT mode — no Supabase data needed, just use LLM knowledge
+    parts.push('=== GENERAL MODE ===\nNo trading intent detected. Respond as a general AI assistant (like ChatGPT). Answer the question directly using your knowledge. Be helpful, concise, and natural. Use markdown formatting when useful.');
   }
   return { context: parts.join('\n\n'), actions, intents };
 }
@@ -425,8 +439,14 @@ export default async function handler(req, res) {
     if (skillResults.whatsapp) skillContext += `\n\n=== WHATSAPP RESULT ===\n${skillResults.whatsapp.success ? 'Sent successfully' : 'Failed: ' + skillResults.whatsapp.error}`;
     if (skillResults.memory) skillContext += `\n\n=== MEMORY STORED ===\n${skillResults.memory.success ? 'Saved' : 'Failed: ' + skillResults.memory.error}`;
 
+    const isGeneral = intents.includes('general') && !intents.includes('live_price') && !intents.includes('active_trades') && !intents.includes('trade_history') && !intents.includes('alerts') && !intents.includes('ai_analysis') && !intents.includes('market_analysis') && !intents.includes('trade_performance');
+    
+    const systemContent = isGeneral 
+      ? `${LIGHTWEIGHT_PROMPT}\n\n${skillContext ? '=== RELEVANT CONTEXT ===\n' + skillContext : ''}`
+      : `${SYSTEM_PROMPT}\n\n=== REAL-TIME CONTEXT FROM SUPABASE ===\n${skillContext}`;
+    
     const messages = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n\n=== REAL-TIME CONTEXT FROM SUPABASE ===\n${skillContext}` },
+      { role: 'system', content: systemContent },
       ...history.slice(-10).map(h => ({ role: h.role, content: h.content })),
       { role: 'user', content: message },
     ];
@@ -438,7 +458,7 @@ export default async function handler(req, res) {
       const groqRes = await fetch(GROQ_URL, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 1024, stream: true }),
+        body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 2048, stream: true }),
       });
       if (!groqRes.ok) { const err = await groqRes.text(); res.write(`data: ${JSON.stringify({ error: err })}\n\n`); return res.end(); }
       const reader = groqRes.body.getReader();
@@ -468,7 +488,7 @@ export default async function handler(req, res) {
     const groqRes = await fetch(GROQ_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 1024, stream: false }),
+      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 2048, stream: false }),
     });
     if (!groqRes.ok) { const err = await groqRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
     const groqData = await groqRes.json();
