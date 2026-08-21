@@ -3,160 +3,286 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gold Sniper AI Agent</title>
+<title>Lyra AI</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --bg: #0a0a0f; --card: #1a1a25; --border: #333;
+  --bg: #212121; --surface: #303030; --surface-hover: #3a3a3a;
+  --border: #424242; --input-bg: #2f2f2f;
+  --text: #ececec; --muted: #9b9b9b;
+  --accent: #10a37f; --accent-hover: #0d8c6d;
   --gold: #FFD700; --gold-dim: #B8860B;
-  --green: #00e676; --red: #ff4444; --blue: #2196F3;
-  --text: #e0e0e0; --muted: #666;
+  --green: #00e676; --red: #ff4444;
+  --user-bubble: #2f2f2f;
 }
-body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -apple-system, system-ui, sans-serif; display: flex; }
 
-.login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 20px; }
-.login-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 40px; width: 320px; text-align: center; }
-.login-card h1 { font-size: 22px; margin-bottom: 8px; }
-.login-card h1 span { color: var(--gold); }
-.login-card p { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
-.login-input { width: 100%; padding: 12px 16px; background: #0d0d15; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; outline: none; text-align: center; }
-.login-input:focus { border-color: var(--gold-dim); }
-.login-btn { width: 100%; padding: 12px; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); color: #000; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; margin-top: 12px; }
-.login-btn:hover { opacity: 0.9; }
-.login-error { color: var(--red); font-size: 12px; min-height: 16px; }
+/* ── Sidebar ── */
+.sidebar { width: 260px; background: #171717; border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: width 0.2s; flex-shrink: 0; }
+.sidebar.collapsed { width: 0; overflow: hidden; }
+.sidebar-top { padding: 12px; }
+.new-chat-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; cursor: pointer; transition: background 0.15s; }
+.new-chat-btn:hover { background: var(--surface-hover); }
+.new-chat-btn svg { width: 18px; height: 18px; }
+.nav-items { flex: 1; overflow-y: auto; padding: 8px 12px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+.nav-item:hover { background: var(--surface); color: var(--text); }
+.nav-item.active { background: var(--surface); color: var(--text); }
+.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+.sidebar-bottom { padding: 12px; border-top: 1px solid var(--border); }
+.sidebar-btn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.15s; width: 100%; }
+.sidebar-btn:hover { background: var(--surface); color: var(--text); }
 
-.chat-screen { display: none; flex-direction: column; height: 100vh; }
-.chat-screen.active { display: flex; }
+/* ── Main ── */
+.main { flex: 1; display: flex; flex-direction: column; height: 100vh; }
 
-.header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: linear-gradient(135deg, #12121a, #1a1a25); border-bottom: 1px solid var(--border); }
-.logo { display: flex; align-items: center; gap: 10px; }
-.logo-icon { width: 32px; height: 32px; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
-.logo-text { font-size: 18px; font-weight: 700; }
-.logo-text span { color: var(--gold); }
-.badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--muted); }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
-.logout { padding: 6px 12px; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 12px; cursor: pointer; }
-.logout:hover { border-color: var(--red); color: var(--red); }
+/* ── Top bar ── */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.topbar-left { display: flex; align-items: center; gap: 10px; }
+.icon-btn { width: 36px; height: 36px; border-radius: 8px; background: transparent; border: none; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s; }
+.icon-btn:hover { background: var(--surface); }
+.icon-btn svg { width: 20px; height: 20px; }
+.model-label { font-size: 16px; font-weight: 600; }
+.model-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); margin-left: 4px; }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #000; cursor: pointer; }
 
-.nav-tabs { display: flex; gap: 4px; padding: 8px 20px; border-bottom: 1px solid var(--border); background: #0d0d15; }
-.tab { padding: 8px 20px; background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.2s; }
-.tab:hover { color: var(--text); }
-.tab.active { background: var(--card); border-color: var(--border); color: var(--gold); }
+/* ── Chat area ── */
+.chat-area { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.chat-container { max-width: 768px; margin: 0 auto; width: 100%; padding: 24px 20px 120px; }
 
-#chatView { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-#chartsView { flex: 1; display: none; flex-direction: column; overflow-y: auto; padding: 20px; }
+/* Welcome screen */
+.welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 24px; }
+.welcome-logo { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.welcome h2 { font-size: 28px; font-weight: 600; color: var(--text); }
+.welcome-suggestions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; max-width: 520px; }
+.suggestion-card { padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: all 0.15s; font-size: 13px; color: var(--muted); }
+.suggestion-card:hover { background: var(--surface-hover); color: var(--text); }
+.suggestion-card strong { display: block; color: var(--text); margin-bottom: 4px; font-size: 14px; }
 
-.messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
-.msg { max-width: 85%; padding: 12px 16px; border-radius: 12px; line-height: 1.5; font-size: 14px; }
-.msg.user { align-self: flex-end; background: #1e3a5f; border: 1px solid #2a4a6f; }
-.msg.agent { align-self: flex-start; background: var(--card); border: 1px solid var(--border); }
-.msg.system { align-self: center; background: transparent; color: var(--muted); font-size: 12px; border: 1px dashed var(--border); }
-.msg.skill { align-self: flex-start; background: #0d1f0d; border: 1px solid var(--green); font-size: 12px; color: var(--green); }
-.typing { align-self: flex-start; color: var(--muted); font-style: italic; padding: 8px 16px; }
+/* Messages — ChatGPT style (no bubbles, avatar + text) */
+.msg { display: flex; gap: 16px; padding: 20px 0; }
+.msg-avatar { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.msg-avatar.assistant { background: linear-gradient(135deg, var(--gold), var(--gold-dim)); color: #000; }
+.msg-avatar.user { background: #5436DA; color: #fff; }
+.msg-content { flex: 1; line-height: 1.7; font-size: 15px; overflow-wrap: break-word; }
+.msg-content p { margin-bottom: 12px; }
+.msg-content p:last-child { margin-bottom: 0; }
+.msg-content h1, .msg-content h2, .msg-content h3 { margin: 16px 0 8px; font-weight: 600; }
+.msg-content h1 { font-size: 20px; } .msg-content h2 { font-size: 18px; } .msg-content h3 { font-size: 16px; }
+.msg-content ul, .msg-content ol { margin: 8px 0 12px; padding-left: 24px; }
+.msg-content li { margin-bottom: 4px; }
+.msg-content code { background: #1a1a1a; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Consolas, monospace; font-size: 13px; }
+.msg-content pre { background: #1a1a1a; padding: 14px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+.msg-content pre code { background: none; padding: 0; }
+.msg-content table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.msg-content th, .msg-content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; font-size: 14px; }
+.msg-content th { background: var(--surface); font-weight: 600; }
+.msg-content a { color: var(--accent); text-decoration: none; }
+.msg-content a:hover { text-decoration: underline; }
+.msg-content strong { font-weight: 600; }
+.msg-content blockquote { border-left: 3px solid var(--border); padding-left: 16px; color: var(--muted); margin: 8px 0; }
+.msg-skill { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; background: #1a3a1a; color: var(--green); border: 1px solid #2a4a2a; margin-top: 8px; }
 
-.skills-bar { display: flex; gap: 6px; padding: 8px 20px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
-.skill-btn { padding: 6px 12px; background: transparent; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); font-size: 11px; cursor: pointer; white-space: nowrap; transition: all 0.2s; }
-.skill-btn:hover { border-color: var(--gold-dim); color: var(--gold); background: rgba(255,215,0,0.05); }
-.skill-btn.green:hover { border-color: var(--green); color: var(--green); }
-.skill-btn.blue:hover { border-color: var(--blue); color: var(--blue); }
+/* Typing indicator */
+.typing { display: flex; gap: 16px; padding: 20px 0; }
+.typing-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.typing-dots { display: flex; gap: 4px; align-items: center; height: 28px; }
+.typing-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 
-.input-area { display: flex; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border); background: var(--card); }
-.input-area input { flex: 1; padding: 12px 16px; background: #0d0d15; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; outline: none; }
-.input-area input:focus { border-color: var(--gold-dim); }
-.input-area button { padding: 12px 24px; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); color: #000; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; }
-.input-area button:hover { opacity: 0.9; }
-.input-area button:disabled { opacity: 0.5; }
+/* ── Input bar (ChatGPT style) ── */
+.input-bar { position: fixed; bottom: 0; left: 0; right: 0; padding: 16px 20px; background: linear-gradient(to top, var(--bg) 60%, transparent); }
+.input-container { max-width: 768px; margin: 0 auto; position: relative; }
+.input-box { display: flex; align-items: flex-end; gap: 10px; background: var(--input-bg); border: 1px solid var(--border); border-radius: 28px; padding: 8px 8px 8px 20px; transition: border-color 0.15s; }
+.input-box:focus-within { border-color: var(--muted); }
+.input-box textarea { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 15px; font-family: inherit; resize: none; max-height: 200px; line-height: 1.5; padding: 8px 0; }
+.input-box textarea::placeholder { color: var(--muted); }
+.send-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--text); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+.send-btn:hover { opacity: 0.85; }
+.send-btn:disabled { background: var(--muted); opacity: 0.4; cursor: not-allowed; }
+.send-btn svg { width: 18px; height: 18px; }
+.input-info { text-align: center; font-size: 11px; color: var(--muted); margin-top: 8px; }
+.input-info a { color: var(--muted); text-decoration: underline; cursor: pointer; }
 
-.stream-toggle { display: flex; align-items: center; gap: 6px; padding: 0 20px 8px; font-size: 11px; color: var(--muted); }
-.stream-toggle input { accent-color: var(--gold); }
-
-/* Charts */
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+/* ── Charts view ── */
+#chartsView { display: none; flex: 1; overflow-y: auto; padding: 20px; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; max-width: 768px; margin-left: auto; margin-right: auto; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
 .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+.stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
 .stat-card .value.green { color: var(--green); }
 .stat-card .value.red { color: var(--red); }
 .stat-card .value.gold { color: var(--gold); }
-
-.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
-.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; max-width: 768px; margin: 0 auto; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .chart-card h3 { font-size: 13px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
 .chart-card canvas { max-height: 250px; }
-
 .loading { text-align: center; padding: 40px; color: var(--muted); }
 
+/* ── Login ── */
+.login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; gap: 20px; width: 100%; }
+.login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 40px; width: 340px; text-align: center; }
+.login-logo { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, var(--gold), var(--gold-dim)); display: flex; align-items: center; justify-content: center; font-size: 22px; margin: 0 auto 16px; }
+.login-card h1 { font-size: 22px; margin-bottom: 8px; }
+.login-card p { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+.login-input { width: 100%; padding: 12px 16px; background: var(--input-bg); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-size: 14px; outline: none; text-align: center; }
+.login-input:focus { border-color: var(--muted); }
+.login-btn { width: 100%; padding: 12px; background: var(--accent); color: #fff; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; font-size: 14px; margin-top: 12px; transition: background 0.15s; }
+.login-btn:hover { background: var(--accent-hover); }
+.login-error { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 8px; }
+
+/* Mobile */
+@media (max-width: 768px) {
+  .sidebar { position: absolute; z-index: 100; height: 100vh; }
+  .sidebar.collapsed { width: 0; }
+  .welcome-suggestions { grid-template-columns: 1fr; }
+  .chat-container { padding: 16px 12px 120px; }
+  .input-bar { padding: 12px 12px; }
+}
+
+/* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 </style>
 </head>
 <body>
 
+<!-- ── Login ── -->
 <div class="login-screen" id="loginScreen">
   <div class="login-card">
-    <h1>Gold <span>Sniper</span> AI</h1>
+    <div class="login-logo">🎯</div>
+    <h1>Lyra AI</h1>
     <p>Enter your access token to continue</p>
     <input type="password" class="login-input" id="authInput" placeholder="Access token" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="login-btn" onclick="doLogin()">Unlock Agent</button>
+    <button class="login-btn" onclick="doLogin()">Continue</button>
     <div class="login-error" id="loginError"></div>
   </div>
 </div>
 
-<div class="chat-screen" id="chatScreen">
-  <div class="header">
-    <div class="logo">
-      <div class="logo-icon">🎯</div>
-      <div class="logo-text">Gold <span>Sniper</span> AI</div>
-      <span class="badge">GPT-OSS-120B</span>
-      <span class="badge">14 Skills</span>
+<!-- ── App ── -->
+<div style="display:none;width:100%;height:100vh" id="app">
+
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <button class="new-chat-btn" onclick="newChat()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        New chat
+      </button>
     </div>
-    <div class="logo">
-      <div class="status-dot"></div>
-      <span style="font-size: 12px; color: var(--muted); margin-right: 12px;">Vercel + Groq</span>
-      <button class="logout" onclick="doLogout()">Logout</button>
+    <div class="nav-items">
+      <div class="nav-item active" onclick="switchView('chat', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Chat
+      </div>
+      <div class="nav-item" onclick="switchView('charts', this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>
+        Charts
+      </div>
+      <div class="nav-item" onclick="askSkill('What is the current gold price?')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        Live Price
+      </div>
+      <div class="nav-item" onclick="askSkill('Show me active trades')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        Active Trades
+      </div>
+      <div class="nav-item" onclick="askSkill('Show me AI candle analysis')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 8v4M12 16h.01"/></svg>
+        AI Patterns
+      </div>
+      <div class="nav-item" onclick="askSkill('Show me trade performance stats')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/></svg>
+        Performance
+      </div>
+      <div class="nav-item" onclick="askSkill('Recent alerts')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        Alerts
+      </div>
+      <div class="nav-item" onclick="askSkill('Engine status?')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+        Engine Status
+      </div>
+      <div class="nav-item" onclick="askSkill('Full market analysis')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 6-6"/></svg>
+        Market Analysis
+      </div>
+      <div class="nav-item" onclick="askSkill('List all files in the GitHub repo')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        File Browser
+      </div>
+      <div class="nav-item" onclick="askSkill('List all tables in the database')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        Database
+      </div>
+    </div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-btn" onclick="doLogout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+        Logout
+      </div>
     </div>
   </div>
 
-  <div class="nav-tabs">
-    <button class="tab active" onclick="switchTab('chat', this)">💬 Chat</button>
-    <button class="tab" onclick="switchTab('charts', this)">📊 Charts</button>
-  </div>
-
-  <div id="chatView">
-    <div class="skills-bar">
-      <button class="skill-btn" onclick="ask('What is the current gold price?')">Live Price</button>
-      <button class="skill-btn" onclick="ask('Show me active trades')">Active Trades</button>
-      <button class="skill-btn" onclick="ask('Trade history last 15')">Trade History</button>
-      <button class="skill-btn" onclick="ask('Show me AI candle analysis')">AI Patterns</button>
-      <button class="skill-btn" onclick="ask('Recent alerts')">Alerts</button>
-      <button class="skill-btn" onclick="ask('Engine status?')">Engine Status</button>
-      <button class="skill-btn green" onclick="ask('Full market analysis')">Market Analysis</button>
-      <button class="skill-btn green" onclick="ask('Show me trade performance stats')">Performance</button>
-      <button class="skill-btn blue" onclick="ask('Send WhatsApp: Gold Sniper alert test')">Send WhatsApp</button>
-      <button class="skill-btn blue" onclick="ask('Remember: Vercel AI agent has 14 skills')">Save Memory</button>
+  <!-- Main area -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn" onclick="toggleSidebar()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+        </button>
+        <span class="model-label">Lyra</span>
+        <span class="model-badge">GPT-OSS-120B</span>
+      </div>
+      <div class="topbar-right">
+        <span style="font-size:12px;color:var(--muted)">14 Skills</span>
+        <div class="avatar">SP</div>
+      </div>
     </div>
 
-    <div class="messages" id="messages">
-      <div class="msg agent">Hey Shubham! I'm your Gold Sniper AI agent — 14 skills, secured. Ask about prices, trades, patterns, or switch to the Charts tab for visual analytics.</div>
+    <!-- Chat -->
+    <div class="chat-area" id="chatArea">
+      <div class="chat-container" id="chatContainer">
+        <div class="welcome" id="welcome">
+          <div class="welcome-logo">🎯</div>
+          <h2>How can I help you?</h2>
+          <div class="welcome-suggestions">
+            <div class="suggestion-card" onclick="askSkill('What is the current gold price?')"><strong>Live Gold Price</strong>Get the latest XAU/USD spot price</div>
+            <div class="suggestion-card" onclick="askSkill('Show me active trades')"><strong>Active Trades</strong>See all open positions with TP/SL levels</div>
+            <div class="suggestion-card" onclick="askSkill('Write a Python function to calculate Fibonacci numbers')"><strong>Coding Help</strong>Ask me to write or debug code</div>
+            <div class="suggestion-card" onclick="askSkill('Show me trade performance stats')"><strong>Performance</strong>Win rate, PnL, and trade statistics</div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="stream-toggle">
-      <input type="checkbox" id="streamToggle" checked> Stream responses
+    <!-- Charts -->
+    <div id="chartsView">
+      <div id="chartsLoading" class="loading">Loading charts...</div>
+      <div id="chartsContent" style="display:none">
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="charts-grid" id="chartsGrid"></div>
+      </div>
     </div>
 
-    <div class="input-area">
-      <input type="text" id="input" placeholder="Ask me anything — gold prices, coding help, general questions..." onkeydown="if(event.key==='Enter')send()">
-      <button id="sendBtn" onclick="send()">Send</button>
-    </div>
-  </div>
-
-  <div id="chartsView">
-    <div id="chartsLoading" class="loading">Loading charts from Supabase...</div>
-    <div id="chartsContent" style="display:none">
-      <div class="stats-grid" id="statsGrid"></div>
-      <div class="charts-grid" id="chartsGrid"></div>
+    <!-- Input bar -->
+    <div class="input-bar" id="inputBar">
+      <div class="input-container">
+        <div class="input-box">
+          <textarea id="input" placeholder="Message Lyra..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}" oninput="autoResize(this)"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="send()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+        <div class="input-info">Lyra can make mistakes. Trading advice is for informational purposes only.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -165,210 +291,221 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 const API = window.location.origin + '/api/chat';
 const CHART_API = window.location.origin + '/api/chart';
 let authToken = sessionStorage.getItem('gs_agent_token') || '';
-const messagesEl = document.getElementById('messages');
-const inputEl = document.getElementById('input');
-const sendBtn = document.getElementById('sendBtn');
-const streamToggle = document.getElementById('streamToggle');
-const loginScreen = document.getElementById('loginScreen');
-const chatScreen = document.getElementById('chatScreen');
-const authInput = document.getElementById('authInput');
-const loginError = document.getElementById('loginError');
 let history = [];
 let sending = false;
 let chartsLoaded = false;
+let hasMessages = false;
 
-if (authToken) showChat();
+const loginScreen = document.getElementById('loginScreen');
+const app = document.getElementById('app');
+const authInput = document.getElementById('authInput');
+const loginError = document.getElementById('loginError');
+const chatContainer = document.getElementById('chatContainer');
+const welcome = document.getElementById('welcome');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+
+if (authToken) showApp();
 
 function doLogin() {
   const token = authInput.value.trim();
   if (!token) { loginError.textContent = 'Please enter your access token'; return; }
-  fetch(API, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': token },
-    body: JSON.stringify({ message: 'test', history: [] }),
-  }).then(res => {
-    if (res.status === 401) { loginError.textContent = 'Invalid token'; authInput.value = ''; }
-    else if (res.ok) { authToken = token; sessionStorage.setItem('gs_agent_token', token); showChat(); }
-    else { loginError.textContent = 'Server error'; }
-  }).catch(() => { loginError.textContent = 'Connection error'; });
+  loginError.textContent = 'Connecting...';
+  fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': token }, body: JSON.stringify({ message: 'test', history: [] }) })
+    .then(res => {
+      if (res.status === 401) { loginError.textContent = 'Invalid token'; authInput.value = ''; }
+      else if (res.ok) { authToken = token; sessionStorage.setItem('gs_agent_token', token); showApp(); }
+      else { loginError.textContent = 'Server error'; }
+    }).catch(() => { loginError.textContent = 'Connection error'; });
 }
 
-function showChat() { loginScreen.style.display = 'none'; chatScreen.classList.add('active'); inputEl.focus(); }
+function showApp() { loginScreen.style.display = 'none'; app.style.display = 'flex'; inputEl.focus(); }
 function doLogout() { sessionStorage.removeItem('gs_agent_token'); authToken = ''; location.reload(); }
+function newChat() { history = []; hasMessages = false; if (welcome) welcome.style.display = 'flex'; chatContainer.innerHTML = ''; chatContainer.appendChild(welcome); inputEl.focus(); switchView('chat', document.querySelector('.nav-item')); }
 
-function switchTab(tab, btn) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('chatView').style.display = tab === 'chat' ? 'flex' : 'none';
-  document.getElementById('chartsView').style.display = tab === 'charts' ? 'flex' : 'none';
-  if (tab === 'charts' && !chartsLoaded) loadCharts();
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); }
+
+function switchView(view, navEl) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (navEl) navEl.classList.add('active');
+  document.getElementById('chatArea').style.display = view === 'chat' ? 'flex' : 'none';
+  document.getElementById('chartsView').style.display = view === 'charts' ? 'block' : 'none';
+  document.getElementById('inputBar').style.display = view === 'chat' ? 'block' : 'none';
+  if (view === 'charts' && !chartsLoaded) loadCharts();
+}
+
+function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; }
+
+// ── Simple markdown parser ──
+function parseMarkdown(text) {
+  let html = text;
+  // Code blocks
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  // Lists
+  html = html.replace(/^\* (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li)/g, '<ul>$1</ul>');
+  // Tables
+  html = html.replace(/\|(.+)\|/g, (match) => {
+    const cells = match.split('|').filter(c => c.trim());
+    if (cells.every(c => /^[-:\s]+$/.test(c.trim()))) return '';
+    return '<tr>' + cells.map(c => `<td>${c.trim()}</td>`).join('') + '</tr>';
+  });
+  html = html.replace(/(<tr>[\s\S]*?<\/tr>)(?!\s*<tr)/g, '<table>$1</table>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  // Clean up extra brs around block elements
+  html = html.replace(/<br>(<h[1-3]>)/g, '$1');
+  html = html.replace(/(<\/h[1-3]>)<br>/g, '$1');
+  html = html.replace(/<br>(<pre>)/g, '$1');
+  html = html.replace(/(<\/pre>)<br>/g, '$1');
+  html = html.replace(/<br>(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)<br>/g, '$1');
+  html = html.replace(/<br>(<table>)/g, '$1');
+  html = html.replace(/(<\/table>)<br>/g, '$1');
+  html = html.replace(/<br><br>/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+  return html;
+}
+
+function addMsg(text, role) {
+  if (welcome) welcome.style.display = 'none';
+  hasMessages = true;
+  const div = document.createElement('div');
+  div.className = 'msg';
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar ' + role;
+  avatar.textContent = role === 'user' ? 'SP' : '🎯';
+  const content = document.createElement('div');
+  content.className = 'msg-content';
+  content.innerHTML = role === 'assistant' ? parseMarkdown(text) : text.replace(/\n/g, '<br>');
+  div.appendChild(avatar);
+  div.appendChild(content);
+  chatContainer.appendChild(div);
+  chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return content;
+}
+
+function addTyping() {
+  if (welcome) welcome.style.display = 'none';
+  const div = document.createElement('div');
+  div.className = 'typing'; div.id = 'typing';
+  div.innerHTML = '<div class="typing-avatar">🎯</div><div class="typing-dots"><span></span><span></span><span></span></div>';
+  chatContainer.appendChild(div);
+  chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}
+
+function removeTyping() { const el = document.getElementById('typing'); if (el) el.remove(); }
+
+function askSkill(q) { switchView('chat', document.querySelector('.nav-item')); inputEl.value = q; send(); }
+
+async function send() {
+  if (sending) return;
+  const message = inputEl.value.trim();
+  if (!message) return;
+  sending = true; sendBtn.disabled = true; inputEl.value = ''; inputEl.style.height = 'auto';
+  addMsg(message, 'user');
+  history.push({ role: 'user', content: message });
+  addTyping();
+  try {
+    const res = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+      body: JSON.stringify({ message, history: history.slice(-10), stream: true }),
+    });
+    if (res.status === 401) { removeTyping(); doLogout(); return; }
+    if (!res.ok) { removeTyping(); const err = await res.json(); addMsg('⚠️ Error: ' + (err.details || err.error || 'Unknown error'), 'assistant'); history.pop(); return; }
+    removeTyping();
+    const contentEl = addMsg('', 'assistant');
+    let fullText = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const d = line.slice(6).trim();
+          if (d === '[DONE]') break;
+          try { const p = JSON.parse(d); if (p.content) { fullText += p.content; contentEl.innerHTML = parseMarkdown(fullText); chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' }); } } catch {}
+        }
+      }
+    }
+    history.push({ role: 'assistant', content: fullText });
+  } catch (err) { removeTyping(); addMsg('⚠️ Connection error: ' + err.message, 'assistant'); }
+  sending = false; sendBtn.disabled = false; inputEl.focus();
 }
 
 // ── Charts ──
 async function loadCharts() {
   try {
-    const res = await fetch(CHART_API + '?type=all', {
-      headers: { 'X-Auth-Token': authToken },
-    });
+    const res = await fetch(CHART_API + '?type=all', { headers: { 'X-Auth-Token': authToken } });
     if (res.status === 401) { doLogout(); return; }
     const data = await res.json();
-    
     document.getElementById('chartsLoading').style.display = 'none';
     document.getElementById('chartsContent').style.display = 'block';
-    
-    // Render stats
     if (data.stats && data.stats.total > 0) {
       const s = data.stats;
-      const statsHtml = [
+      const stats = [
         { label: 'Total Trades', value: s.total, class: 'gold' },
         { label: 'Win Rate', value: s.winRate + '%', class: s.wins > s.losses ? 'green' : 'red' },
-        { label: 'Total PnL', value: '$' + s.totalPnL, class: parseFloat(s.totalPnL) >= 0 ? 'green' : 'red' },
+        { label: 'Total PnL', value: s.totalPips + ' pips', class: parseFloat(s.totalPips) >= 0 ? 'green' : 'red' },
         { label: 'Wins', value: s.wins, class: 'green' },
         { label: 'Losses', value: s.losses, class: 'red' },
-        { label: 'Avg Win', value: '$' + s.avgWin, class: 'green' },
-        { label: 'Avg Loss', value: '$' + s.avgLoss, class: 'red' },
-        { label: 'Best Trade', value: '$' + s.bestTrade, class: 'green' },
-        { label: 'Worst Trade', value: '$' + s.worstTrade, class: 'red' },
-      ].map(st => `<div class="stat-card"><div class="label">${st.label}</div><div class="value ${st.class}">${st.value}</div></div>`).join('');
-      document.getElementById('statsGrid').innerHTML = statsHtml;
+        { label: 'Avg Win', value: s.avgWin, class: 'green' },
+        { label: 'Avg Loss', value: s.avgLoss, class: 'red' },
+        { label: 'Best Trade', value: s.bestTrade, class: 'green' },
+        { label: 'Worst Trade', value: s.worstTrade, class: 'red' },
+      ];
+      document.getElementById('statsGrid').innerHTML = stats.map(st => `<div class="stat-card"><div class="label">${st.label}</div><div class="value ${st.class}">${st.value}</div></div>`).join('');
     } else {
       document.getElementById('statsGrid').innerHTML = '<div class="stat-card"><div class="label">No Data</div><div class="value">No trades yet</div></div>';
     }
-
-    // Render charts
     const charts = data.charts || {};
     const grid = document.getElementById('chartsGrid');
-    const chartDefs = [
+    const defs = [
       { key: 'equity', title: '📈 Equity Curve (Cumulative PnL)' },
       { key: 'winloss', title: '🏆 Win/Loss by Timeframe' },
       { key: 'distribution', title: '📊 PnL Distribution' },
       { key: 'price', title: '💰 Price History' },
-      { key: 'direction', title: '🔄 Long vs Short Split' },
+      { key: 'direction', title: '🔄 Buy/Sell Split' },
       { key: 'confidence', title: '🤖 AI Confidence by Timeframe' },
       { key: 'tp', title: '🎯 TP Hit Progress' },
     ];
-
-    chartDefs.forEach(def => {
+    defs.forEach(def => {
       const cd = charts[def.key];
       if (cd && cd.labels && cd.labels.length > 0) {
         const div = document.createElement('div');
         div.className = 'chart-card';
         div.innerHTML = `<h3>${def.title}</h3><canvas id="chart_${def.key}"></canvas>`;
         grid.appendChild(div);
-        
-        const ctx = document.getElementById('chart_' + def.key).getContext('2d');
-        new Chart(ctx, {
+        new Chart(document.getElementById('chart_' + def.key).getContext('2d'), {
           type: cd.type,
           data: { labels: cd.labels, datasets: cd.datasets },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { labels: { color: '#e0e0e0', font: { size: 11 } } },
-            },
-            scales: cd.type === 'doughnut' ? {} : {
-              x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#222' } },
-              y: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#222' } },
-            },
-          },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#ececec', font: { size: 11 } } } },
+            scales: cd.type === 'doughnut' ? {} : { x: { ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: '#424242' } }, y: { ticks: { color: '#9b9b9b', font: { size: 10 } }, grid: { color: '#424242' } } } } },
         });
       }
     });
-
     chartsLoaded = true;
-  } catch (err) {
-    document.getElementById('chartsLoading').textContent = 'Error loading charts: ' + err.message;
-  }
-}
-
-// ── Chat ──
-function addMsg(text, type) {
-  const div = document.createElement('div');
-  div.className = 'msg ' + type;
-  div.innerHTML = text.replace(/\n/g, '<br>');
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-  return div;
-}
-
-function addTyping() {
-  const div = document.createElement('div');
-  div.className = 'typing'; div.id = 'typing';
-  div.textContent = 'Agent is thinking...';
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function removeTyping() {
-  const el = document.getElementById('typing');
-  if (el) el.remove();
-}
-
-function ask(q) { inputEl.value = q; send(); }
-
-async function send(msg) {
-  if (sending) return;
-  const message = msg || inputEl.value.trim();
-  if (!message) return;
-  sending = true; sendBtn.disabled = true; inputEl.value = '';
-  addMsg(message, 'user');
-  history.push({ role: 'user', content: message });
-  const useStream = streamToggle.checked;
-
-  if (useStream) {
-    addTyping();
-    try {
-      const res = await fetch(API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ message, history: history.slice(-10), stream: true }),
-      });
-      if (res.status === 401) { removeTyping(); doLogout(); return; }
-      if (!res.ok) { removeTyping(); const err = await res.json(); addMsg('Error: ' + (err.details || err.error), 'system'); return; }
-      removeTyping();
-      const msgDiv = addMsg('', 'agent');
-      let fullText = '';
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const d = line.slice(6).trim();
-            if (d === '[DONE]') break;
-            try { const p = JSON.parse(d); if (p.content) { fullText += p.content; msgDiv.innerHTML = fullText.replace(/\n/g, '<br>'); messagesEl.scrollTop = messagesEl.scrollHeight; } } catch {}
-          }
-        }
-      }
-      history.push({ role: 'assistant', content: fullText });
-    } catch (err) { removeTyping(); addMsg('Stream error: ' + err.message, 'system'); }
-  } else {
-    addTyping();
-    try {
-      const res = await fetch(API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-        body: JSON.stringify({ message, history: history.slice(-10) }),
-      });
-      const data = await res.json();
-      removeTyping();
-      if (res.status === 401) { doLogout(); return; }
-      if (data.error) { addMsg('Error: ' + (data.details || data.error), 'system'); }
-      else {
-        addMsg(data.reply, 'agent');
-        history.push({ role: 'assistant', content: data.reply });
-        if (data.skills) {
-          if (data.skills.whatsapp) addMsg(data.skills.whatsapp.success ? 'WhatsApp sent' : 'WhatsApp failed: ' + data.skills.whatsapp.error, 'skill');
-          if (data.skills.memory) addMsg(data.skills.memory.success ? 'Memory saved to Supabase' : 'Memory failed: ' + data.skills.memory.error, 'skill');
-        }
-      }
-    } catch (err) { removeTyping(); addMsg('Error: ' + err.message, 'system'); }
-  }
-  sending = false; sendBtn.disabled = false; inputEl.focus();
+  } catch (err) { document.getElementById('chartsLoading').textContent = 'Error: ' + err.message; }
 }
 
 inputEl.focus();
