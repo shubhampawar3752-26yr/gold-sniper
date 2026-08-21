@@ -37,6 +37,17 @@ You have these SKILLS:
 10. TRADE_PERFORMANCE — aggregate stats (win rate, avg PnL, etc.)
 11. DATA_VISUALIZATION — view charts and stats (available at /Charts tab)
 12. DATABASE_CRUD — insert, update, delete, query records in Supabase tables
+13. HTML_CSS_EDITOR — read, edit, and push HTML/CSS/JS files to GitHub via natural language
+
+For HTML_CSS_EDITOR:
+- Available at /api/editor endpoint
+- GET /api/editor?path=index.html — read a file from the GitHub repo
+- GET /api/editor?list= — list files in a directory
+- POST /api/editor with { path: "file.html", instruction: "make the background blue", preview: true } — preview an edit
+- POST /api/editor with { path: "file.html", instruction: "make the background blue" } — apply and push to GitHub
+- The LLM generates the edit based on natural language instruction
+- Changes are committed to GitHub and auto-deploy via GitHub Pages
+- ALWAYS show a preview first (preview: true) before applying changes
 
 For DATABASE_CRUD:
 - Allowed tables: trade_history, alerts, ai_candle_analysis, engine_logs, conversation_memories, active_trades
@@ -208,6 +219,7 @@ function detectIntent(message) {
   if (msg.match(/analyz|overview|summary|how.*market|market.*summary/)) intents.push('market_analysis');
   if (msg.match(/tp.*hit|take profit/) || msg.match(/sl.*hit|stop loss/)) intents.push('active_trades');
   if (msg.match(/insert|add.*record|create.*record|update.*record|delete.*record|query.*table|database|db /)) intents.push('database');
+  if (msg.match(/edit.*html|edit.*css|change.*color|change.*layout|update.*dashboard|modify.*page|edit.*file|fix.*css|style/)) intents.push('editor');
   return intents;
 }
 
@@ -275,6 +287,10 @@ async function buildContext(userMessage) {
       actions.push('database');
       parts.push(`=== DATABASE COMMAND DETECTED ===\nAction: ${dbCmd.action}\nTable: ${dbCmd.table || 'unknown'}\nAvailable tables: trade_history, alerts, ai_candle_analysis, engine_logs, conversation_memories, active_trades\nTell the user what you detected and ask for confirmation before executing writes/deletes.`);
     }
+  }
+  if (intents.includes('editor')) {
+    actions.push('editor');
+    parts.push('=== HTML/CSS EDITOR READY ===\nUser wants to edit HTML/CSS. Ask which file to edit if not specified. Available files: index.html (dashboard), ai-agent/index.html (AI agent UI), styles.css, etc. Use /api/editor to read and modify files. ALWAYS preview before applying.');
   }
   return { context: parts.join('\n\n'), actions, intents };
 }
