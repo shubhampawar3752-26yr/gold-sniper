@@ -155,7 +155,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', -appl
 <body>
 
 <!-- ── Login ── -->
-<div class="login-screen" id="loginScreen">
+<div class="login-screen" id="loginScreen" style="display:none">
   <div class="login-card">
     <div class="login-logo">🎯</div>
     <h1>Lyra AI</h1>
@@ -305,7 +305,7 @@ const welcome = document.getElementById('welcome');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
 
-if (authToken) showApp();
+showApp(); // Auth removed — skip login
 
 function doLogin() {
   const token = authInput.value.trim();

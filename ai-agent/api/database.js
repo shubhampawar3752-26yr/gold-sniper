@@ -5,11 +5,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://schegpkwfwkgfmmpnzic.s
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN;
 
-function checkAuth(req) {
-  if (!AUTH_TOKEN) return true;
-  const authHeader = req.headers['x-auth-token'] || req.headers['authorization'] || '';
-  return authHeader.replace('Bearer ', '').trim() === AUTH_TOKEN;
-}
+function checkAuth(req) { return true; } // Auth removed
 
 // ── Allowed tables (whitelist for safety) ──
 const ALLOWED_TABLES = [
@@ -44,7 +40,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Auth-Token, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (!checkAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
+  // Auth removed — open access
 
   try {
     const { action, table, query, data, limit, offset, select, order } = req.query.method ? req.query : (req.body || {});

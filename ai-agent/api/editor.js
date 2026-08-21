@@ -8,11 +8,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL = 'openai/gpt-oss-120b';
 
-function checkAuth(req) {
-  if (!AUTH_TOKEN) return true;
-  const authHeader = req.headers['x-auth-token'] || req.headers['authorization'] || '';
-  return authHeader.replace('Bearer ', '').trim() === AUTH_TOKEN;
-}
+function checkAuth(req) { return true; } // Auth removed
 
 const [OWNER, REPO] = GITHUB_REPO.split('/');
 
@@ -156,7 +152,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Auth-Token, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (!checkAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
+  // Auth removed — open access
 
   try {
     if (req.method === 'GET') {
