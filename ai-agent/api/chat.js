@@ -35,6 +35,18 @@ You have these SKILLS:
 8. MEMORY_STORE — save new facts to conversation_memories table
 9. MARKET_ANALYSIS — comprehensive analysis combining all data
 10. TRADE_PERFORMANCE — aggregate stats (win rate, avg PnL, etc.)
+11. DATA_VISUALIZATION — view charts and stats (available at /Charts tab)
+12. DATABASE_CRUD — insert, update, delete, query records in Supabase tables
+
+For DATABASE_CRUD:
+- Allowed tables: trade_history, alerts, ai_candle_analysis, engine_logs, conversation_memories, active_trades
+- When user asks to insert/update/delete, ALWAYS confirm the operation before executing
+- Use the /api/database endpoint with X-Auth-Token header
+- For reads: GET /api/database?table=X&select=field1,field2&limit=50&order=created_at.desc
+- For inserts: POST /api/database with { table: "X", data: {...} }
+- For updates: PATCH /api/database with { table: "X", filter: "id=eq.5", data: {...} }
+- For deletes: DELETE /api/database?table=X&filter=id=eq.5
+- Always show what will be changed before confirming
 
 When the user asks you to:
 - "Send WhatsApp" / "notify me" / "alert" -> use WHATSAPP_SEND skill
@@ -195,6 +207,7 @@ function detectIntent(message) {
   if (msg.match(/performance|win rate|stats|p&l|pnl|profit/)) intents.push('trade_performance');
   if (msg.match(/analyz|overview|summary|how.*market|market.*summary/)) intents.push('market_analysis');
   if (msg.match(/tp.*hit|take profit/) || msg.match(/sl.*hit|stop loss/)) intents.push('active_trades');
+  if (msg.match(/insert|add.*record|create.*record|update.*record|delete.*record|query.*table|database|db /)) intents.push('database');
   return intents;
 }
 
@@ -256,7 +269,103 @@ async function buildContext(userMessage) {
   }
   if (intents.includes('whatsapp_send')) { actions.push('whatsapp_send'); }
   if (intents.includes('memory')) { actions.push('memory_store'); }
+  if (intents.includes('database')) {
+    const dbCmd = parseDBCommand(message);
+    if (dbCmd) {
+      actions.push('database');
+      parts.push(`=== DATABASE COMMAND DETECTED ===\nAction: ${dbCmd.action}\nTable: ${dbCmd.table || 'unknown'}\nAvailable tables: trade_history, alerts, ai_candle_analysis, engine_logs, conversation_memories, active_trades\nTell the user what you detected and ask for confirmation before executing writes/deletes.`);
+    }
+  }
   return { context: parts.join('\n\n'), actions, intents };
+}
+
+
+// ── Database CRUD skill ──
+async function dbListTables() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+      headers: { 'apikey': SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY}` },
+    });
+    return ['trade_history', 'alerts', 'ai_candle_analysis', 'engine_logs', 'conversation_memories', 'active_trades'];
+  } catch { return []; }
+}
+
+async function dbInsert(table, records) {
+  try {
+    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+      method: 'POST',
+      headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(records),
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return { success: true, data: await res.json() };
+  } catch (e) { return { success: false, error: e.message }; }
+}
+
+async function dbUpdate(table, filter, updates) {
+  try {
+    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`, {
+      method: 'PATCH',
+      headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return { success: true, data: await res.json() };
+  } catch (e) { return { success: false, error: e.message }; }
+}
+
+async function dbDelete(table, filter) {
+  try {
+    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`, {
+      method: 'DELETE',
+      headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return { success: true, data: await res.json() };
+  } catch (e) { return { success: false, error: e.message }; }
+}
+
+async function dbRead(table, params = '') {
+  try {
+    const key = SUPABASE_SERVICE_KEY || SUPABASE_ANON_KEY;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${params}`, {
+      headers: { 'apikey': key, 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    return { success: true, data: await res.json() };
+  } catch (e) { return { success: false, error: e.message }; }
+}
+
+// ── Parse natural language database command ──
+function parseDBCommand(message) {
+  const msg = message.toLowerCase();
+  const ALLOWED = ['trade_history', 'alerts', 'ai_candle_analysis', 'engine_logs', 'conversation_memories', 'active_trades'];
+  
+  // Detect CRUD intent
+  let action = null;
+  if (msg.match(/insert|add|create|new/) && msg.match(/record|entry|row|trade|alert/)) action = 'insert';
+  else if (msg.match(/update|modify|change|edit|set/)) action = 'update';
+  else if (msg.match(/delete|remove|drop|clear/)) action = 'delete';
+  else if (msg.match(/query|select|fetch|get.*from|show.*table|list.*table/)) action = 'read';
+  
+  if (!action) return null;
+  
+  // Detect table
+  let table = null;
+  for (const t of ALLOWED) {
+    if (msg.includes(t.replace(/_/g, ' ')) || msg.includes(t)) { table = t; break; }
+  }
+  if (msg.includes('trade history') || msg.includes('trade_history')) table = 'trade_history';
+  if (msg.includes('alert')) table = 'alerts';
+  if (msg.includes('ai') && msg.includes('analysis')) table = 'ai_candle_analysis';
+  if (msg.includes('engine') && msg.includes('log')) table = 'engine_logs';
+  if (msg.includes('memory') || msg.includes('memories')) table = 'conversation_memories';
+  if (msg.includes('active') && msg.includes('trade')) table = 'active_trades';
+  
+  return { action, table };
 }
 
 function extractWhatsAppMessage(message) {
