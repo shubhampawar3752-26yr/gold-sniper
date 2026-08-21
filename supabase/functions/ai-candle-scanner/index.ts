@@ -1,15 +1,15 @@
 // ── AI Candle Scanner Agent ──
 // Scans candlestick patterns + momentum across all timeframes
-// Uses TradingView scanner for indicators + TwelveData for OHLC candles
+// Uses TradingView scanner for indicators + OHLC, TwelveData for historical candles (smart cached)
 // Feeds smart entry/SL/TP recommendations to the signal engine
 
 const TFS = [
-  { l: '1M', tv: '1', td: '1min' },
-  { l: '5M', tv: '5', td: '5min' },
-  { l: '15M', tv: '15', td: '15min' },
-  { l: '30M', tv: '30', td: '30min' },
-  { l: '1H', tv: '60', td: '1h' },
-  { l: '4H', tv: '240', td: '4h' },
+  { l: '1M', tv: '1', td: '1min', mins: 1 },
+  { l: '5M', tv: '5', td: '5min', mins: 5 },
+  { l: '15M', tv: '15', td: '15min', mins: 15 },
+  { l: '30M', tv: '30', td: '30min', mins: 30 },
+  { l: '1H', tv: '60', td: '1h', mins: 60 },
+  { l: '4H', tv: '240', td: '4h', mins: 240 },
 ];
 
 const TV_SYMBOL = 'OANDA:XAUUSD';
@@ -20,32 +20,97 @@ const TD_KEY = Deno.env.get('TWELVE_DATA_API_KEY') || '';
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-// ── Fetch TradingView indicators (same fields as xau-monitor) ──
+// In-memory cache for bar-change detection (survives within warm instance)
+const barCache: Record<string, { barTime: number; candles: any[] }> = {};
+
+function getBarTime(tfMins: number): number {
+  const now = Date.now();
+  return Math.floor(now / (tfMins * 60 * 1000)) * (tfMins * 60 * 1000);
+}
+
+// ── Fetch TradingView indicators + per-timeframe OHLC ──
 async function fetchTVIndicators(): Promise<Record<string, any>> {
   const fields: string[] = [];
   for (const tf of TFS) {
     fields.push(`EMA9|${tf.tv}`, `EMA21|${tf.tv}`, `ATR|${tf.tv}`, `RSI|${tf.tv}`,
       `MACD.macd|${tf.tv}`, `MACD.signal|${tf.tv}`, `Recommend.All|${tf.tv}`, `close|${tf.tv}`);
+    fields.push(`open|${tf.tv}`, `high|${tf.tv}`, `low|${tf.tv}`);
   }
-  fields.push('EMA9', 'EMA21', 'ATR', 'RSI', 'close');
+  fields.push('EMA9', 'EMA21', 'ATR', 'RSI', 'close', 'open', 'high', 'low');
 
   const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(TV_SYMBOL)}&fields=${fields.join(',')}`;
   const r = await fetch(url, { headers: TV_HEADERS });
   if (!r.ok) throw new Error(`TV scanner ${r.status}`);
   const d: any = await r.json();
-  // TradingView scanner returns flat object with keys like EMA9|5, RSI|5, etc.
   return d;
 }
 
-// ── Fetch OHLC candles from TwelveData ──
-async function fetchCandles(tf: any): Promise<any[]> {
+// ── Build a candle from TradingView per-timeframe OHLC ──
+function buildTVCandle(tvData: any, tf: any): any | null {
+  const o = tvData[`open|${tf.tv}`];
+  const h = tvData[`high|${tf.tv}`];
+  const l = tvData[`low|${tf.tv}`];
+  const c = tvData[`close|${tf.tv}`] || tvData['close'];
+  if (o == null || h == null || l == null || c == null) return null;
+  return { open: String(o), high: String(h), low: String(l), close: String(c) };
+}
+
+// ── Fetch OHLC candles with smart caching + TradingView fallback ──
+async function fetchCandles(tf: any, tvData: any, prevCandle: any): Promise<{ candles: any[]; source: string }> {
+  const currentBarTime = getBarTime(tf.mins);
+  const tvCandle = buildTVCandle(tvData, tf);
+  const currentClose = tvData[`close|${tf.tv}`] || tvData['close'] || 0;
+
+  // Check in-memory cache: if bar hasn't changed, reuse cached candles with updated close
+  const cached = barCache[tf.l];
+  if (cached && cached.barTime === currentBarTime && cached.candles.length >= 2) {
+    const freshCandles = [...cached.candles];
+    if (freshCandles.length > 0 && tvCandle) {
+      // Update current bar with live TV OHLC
+      freshCandles[freshCandles.length - 1] = tvCandle;
+    }
+    return { candles: freshCandles, source: 'cache' };
+  }
+
+  // Bar changed or no cache — try TwelveData
+  const tdCandles = await fetchCandlesFromTwelveData(tf);
+  if (tdCandles.length >= 2) {
+    barCache[tf.l] = { barTime: currentBarTime, candles: tdCandles };
+    return { candles: tdCandles, source: 'twelvedata' };
+  }
+
+  // TwelveData failed — use DB previous candle + current TV candle
+  if (prevCandle && tvCandle) {
+    // Check if prevCandle is from a different bar (not the current bar)
+    const prevBarTime = prevCandle.barTime || 0;
+    if (prevBarTime < currentBarTime) {
+      const combined = [prevCandle, tvCandle];
+      barCache[tf.l] = { barTime: currentBarTime, candles: combined };
+      return { candles: combined, source: 'tv+db' };
+    }
+    // Same bar — just use current TV candle
+    return { candles: [tvCandle], source: 'tv-only' };
+  }
+
+  // No prev candle, no TwelveData — just use current TV candle
+  if (tvCandle) {
+    barCache[tf.l] = { barTime: currentBarTime, candles: [tvCandle] };
+    return { candles: [tvCandle], source: 'tv-only' };
+  }
+
+  return { candles: [], source: 'none' };
+}
+
+// ── Raw TwelveData fetch ──
+async function fetchCandlesFromTwelveData(tf: any): Promise<any[]> {
   if (!TD_KEY) return [];
   const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(TD_SYMBOL)}&interval=${tf.td}&outputsize=5&apikey=${TD_KEY}`;
   try {
     const r = await fetch(url);
     if (!r.ok) return [];
     const d: any = await r.json();
-    return (d?.values || []).slice(0, 3).reverse(); // 3 most recent candles, oldest first
+    if (d.status === 'error' || (d.message && d.message.includes('credits'))) return [];
+    return (d?.values || []).slice(0, 3).reverse();
   } catch { return []; }
 }
 
@@ -168,13 +233,40 @@ async function storeAnalysis(analysis: any) {
   });
 }
 
+
+// ── Read previous candle from ai_candle_analysis (persists across invocations) ──
+async function readPrevCandles(): Promise<Record<string, any>> {
+  try {
+    // Read most recent analysis for each timeframe
+    const r = await fetch(`${SUPA_URL}/rest/v1/ai_candle_analysis?select=timeframe,metadata&order=created_at.desc&limit=24`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+    });
+    if (!r.ok) return {};
+    const rows = await r.json();
+    const result: Record<string, any> = {};
+    for (const row of rows) {
+      const tf = row.timeframe;
+      if (result[tf]) continue; // already have the most recent for this TF
+      const meta = row.metadata || {};
+      if (meta.lastCandle) {
+        result[tf] = meta.lastCandle; // { open, high, low, close, barTime }
+      }
+    }
+    return result;
+  } catch { return {}; }
+}
+
 // ── Main handler ──
 Deno.serve(async (req) => {
   try {
+    const t_start = Date.now();
     const tvData = await fetchTVIndicators();
     const livePrice = tvData['close'] || tvData['EMA9'] || tvData['close|1'] || 0;
     const results: any[] = [];
     const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
+    const sources: Record<string, string> = {};
+    let tdCalls = 0;
+    const prevCandles = await readPrevCandles();
 
     for (const tf of TFS) {
       const tv = tf.tv;
@@ -211,8 +303,11 @@ Deno.serve(async (req) => {
       if (recommend != null) strength = (strength + Math.abs(recommend)) / 2;
       strength = Math.min(strength, 1);
 
-      // Fetch candles from TwelveData for pattern detection
-      const candles = await fetchCandles(tf);
+      // Fetch candles with smart caching + TradingView fallback
+      const { candles, source } = await fetchCandles(tf, tvData, prevCandles[tf.l]);
+      sources[tf.l] = source;
+      if (source === 'twelvedata') tdCalls++;
+
       const patterns = detectPatterns(candles);
       const pivots = calcPivots(candles);
 
@@ -235,15 +330,19 @@ Deno.serve(async (req) => {
         suggested_tp1: rec.suggested_tp1, suggested_tp2: rec.suggested_tp2, suggested_tp3: rec.suggested_tp3,
         risk_reward: rec.risk_reward,
         patterns_detected: patterns.map(p => ({ name: p.name, type: p.type, confidence: p.confidence })),
-        metadata: { recommendAll: recommend, bullScore: rec.bullScore, bearScore: rec.bearScore, totalScore: rec.totalScore, atr, candleCount: candles.length },
+        metadata: { recommendAll: recommend, bullScore: rec.bullScore, bearScore: rec.bearScore, totalScore: rec.totalScore, atr, candleCount: candles.length, source, lastCandle: candles.length > 0 ? { open: candles[candles.length-1].open, high: candles[candles.length-1].high, low: candles[candles.length-1].low, close: candles[candles.length-1].close, barTime: getBarTime(tf.mins) } : null },
       };
 
       await storeAnalysis(analysis);
       results.push(analysis);
     }
 
+    const duration_ms = Date.now() - t_start;
     return new Response(JSON.stringify({
       success: true, timestamp: now, price: livePrice,
+      td_calls: tdCalls,
+      duration_ms,
+      sources,
       timeframes: results.map(r => ({
         tf: r.timeframe, price: r.price,
         pattern: r.pattern, patternType: r.pattern_type, patternConfidence: r.pattern_confidence,
@@ -255,10 +354,12 @@ Deno.serve(async (req) => {
         tp1: r.suggested_tp1?.toFixed(2), tp2: r.suggested_tp2?.toFixed(2), tp3: r.suggested_tp3?.toFixed(2),
         support: r.support?.toFixed(2), resistance: r.resistance?.toFixed(2),
         patternsDetected: r.patterns_detected?.length || 0,
+        candleCount: r.metadata?.candleCount || 0,
+        source: r.metadata?.source || '?',
         bullScore: r.metadata?.bullScore?.toFixed(1), bearScore: r.metadata?.bearScore?.toFixed(1),
       })),
     }), { headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
-    return new Response(JSON.stringify({ success: false, error: (e as Error).message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ success: false, error: (e as Error).message, stack: (e as Error).stack?.slice(0, 500) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 });
