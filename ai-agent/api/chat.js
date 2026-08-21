@@ -458,7 +458,14 @@ export default async function handler(req, res) {
         headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 2048, stream: true }),
       });
-      if (!groqRes.ok) { const err = await groqRes.text(); res.write(`data: ${JSON.stringify({ error: err })}\n\n`); return res.end(); }
+      if (!groqRes.ok) { 
+        const err = await groqRes.text(); 
+        // Check if it's a rate limit error
+        try { const e = JSON.parse(err); if (e.error?.code === 'rate_limit_exceeded') { return res.status(429).json({ error: 'Rate limited', details: 'AI is busy. Please wait a few seconds and try again.' }); } } catch {}
+        res.write(`data: ${JSON.stringify({ error: 'AI error: ' + err.substring(0, 200) })}\n\n`); 
+        res.write('data: [DONE]\n\n');
+        return res.end(); 
+      }
       const reader = groqRes.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';

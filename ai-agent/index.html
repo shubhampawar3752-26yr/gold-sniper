@@ -386,7 +386,22 @@ async function send() {
       body: JSON.stringify({ message, history: history.slice(-10), stream: true }),
     });
 
-    if (!res.ok) { removeTyping(); const err = await res.json(); addMsg('⚠️ Error: ' + (err.details || err.error || 'Unknown error'), 'assistant'); history.pop(); return; }
+    if (!res.ok) { 
+      removeTyping(); 
+      try { const err = await res.json(); addMsg('⚠️ ' + (err.details || err.error || 'Server error'), 'assistant'); } catch { addMsg('⚠️ Server error. Please try again.', 'assistant'); }
+      history.pop(); return; 
+    }
+    
+    // Check if response is a stream or JSON
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      // Non-stream response (error or fallback)
+      removeTyping();
+      const data = await res.json();
+      if (data.error) { addMsg('⚠️ ' + (data.details || data.error), 'assistant'); history.pop(); return; }
+      if (data.reply) { addMsg(data.reply, 'assistant'); history.push({ role: 'assistant', content: data.reply }); return; }
+    }
+    
     removeTyping();
     const contentEl = addMsg('', 'assistant');
     let fullText = '';
@@ -403,11 +418,15 @@ async function send() {
         if (line.startsWith('data: ')) {
           const d = line.slice(6).trim();
           if (d === '[DONE]') break;
-          try { const p = JSON.parse(d); if (p.content) { fullText += p.content; contentEl.innerHTML = parseMarkdown(fullText); chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' }); } } catch {}
+          try { const p = JSON.parse(d); 
+            if (p.error) { contentEl.innerHTML = '⚠️ Error: ' + (p.error || 'Unknown error'); return; }
+            if (p.content) { fullText += p.content; contentEl.innerHTML = parseMarkdown(fullText); chatContainer.scrollIntoView({ behavior: 'smooth', block: 'end' }); }
+          } catch {}
         }
       }
     }
-    history.push({ role: 'assistant', content: fullText });
+    if (!fullText) { contentEl.innerHTML = '⚠️ No response received. Please try again.'; }
+    else history.push({ role: 'assistant', content: fullText });
   } catch (err) { removeTyping(); addMsg('⚠️ Connection error: ' + err.message, 'assistant'); }
   sending = false; sendBtn.disabled = false; inputEl.focus();
 }
@@ -415,7 +434,7 @@ async function send() {
 // ── Charts ──
 async function loadCharts() {
   try {
-    const res = await fetch(CHART_API + '?type=all', { {} });
+    const res = await fetch(CHART_API + '?type=all');
 
     const data = await res.json();
     document.getElementById('chartsLoading').style.display = 'none';
