@@ -79,6 +79,7 @@ function ns() {
     prevEma9: null as number | null, prevEma21: null as number | null,
     lastFlipTime: null as string | null,
     aiConfirmed: false, aiReason: 'no_ai_data',
+    entryTime: null as string | null,
   };
 }
 
@@ -217,6 +218,53 @@ async function supaUpdate(table: string, data: any, id: number) {
     body: JSON.stringify(data),
   });
   if (!r.ok) console.error(`Update ${table} FAILED (${r.status})`);
+}
+
+
+
+// ── Record closed trade in trade_history table ──
+async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReason: string) {
+  if (!s.entry || s.entry === 0 || !s.entryTime) return;
+  const tpsHit = (s.tp1Hit ? 1 : 0) + (s.tp2Hit ? 1 : 0) + (s.tp3Hit ? 1 : 0);
+  const entryTime = new Date(s.entryTime);
+  const exitTime = new Date();
+  const durationMin = Math.round((exitTime.getTime() - entryTime.getTime()) / 60000);
+  
+  // Calculate PnL in pips (gold: 1 pip = $0.01, but we'll use $1 = 1 pip for simplicity)
+  let pnlPips = 0;
+  if (exitReason === 'sl_hit' || exitReason === 'ema_flip') {
+    pnlPips = s.dir === 'long' ? exitPrice - s.entry : s.entry - exitPrice;
+  } else if (exitReason === 'all_tps_hit') {
+    pnlPips = s.dir === 'long' ? s.tp3 - s.entry : s.entry - s.tp3;
+  }
+  const pnlPercent = s.entry > 0 ? (pnlPips / s.entry) * 100 : 0;
+  
+  try {
+    await supaInsert('trade_history', {
+      timeframe: l,
+      cycle: s.cycle,
+      direction: s.dir,
+      entry_price: s.entry,
+      exit_price: exitPrice,
+      sl_price: s.sl,
+      tp1_price: s.tp1,
+      tp2_price: s.tp2,
+      tp3_price: s.tp3,
+      tp1_hit: s.tp1Hit,
+      tp2_hit: s.tp2Hit,
+      tp3_hit: s.tp3Hit,
+      tps_hit: tpsHit,
+      exit_reason: exitReason,
+      atr: s.atr || 0,
+      ai_confirmed: s.aiConfirmed || false,
+      ai_reason: s.aiReason || '',
+      entry_time: s.entryTime,
+      exit_time: exitTime.toISOString(),
+      duration_minutes: durationMin,
+      pnl_pips: pnlPips,
+      pnl_percent: pnlPercent,
+    });
+  } catch (e) { console.error(`trade_history insert failed: ${(e as Error).message}`); }
 }
 
 // ── Idempotency: check if alert already exists for this timeframe/cycle/type ──
@@ -480,6 +528,7 @@ Deno.serve(async (req) => {
       s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
       s.slHit = s.allDone = false;
       setLevels(s, atr);
+      s.entryTime = new Date().toISOString();
 
       const ai = aiAnalysis[l];
       const aiCheck = aiConfirms(ai, s.dir);
@@ -516,6 +565,7 @@ Deno.serve(async (req) => {
         s.slHit = s.allDone = false;
         s.lastSignal = crossUp ? 'buy' : 'sell';
         setLevels(s, atr);
+        s.entryTime = new Date().toISOString();
 
         const ai = aiAnalysis[l];
         const aiCheck = aiConfirms(ai, s.dir);
@@ -564,6 +614,42 @@ Deno.serve(async (req) => {
       }
     } catch (e) {
       errors.push(`Tick ${t}: ${(e as Error).message}`);
+    }
+  }
+
+
+  // ── Record closed trades in trade_history ──
+  for (const tf of TFS) {
+    const l = tf.l;
+    const s = states[l];
+    const p = prev[l] || {};
+    if (!s || s.entry === 0) continue;
+    
+    // Check if trade just closed in this run
+    const wasOpen = !p.slHit && !p.allDone;
+    const isNowClosed = s.slHit || s.allDone;
+    
+    if (wasOpen && isNowClosed) {
+      // Determine exit reason and price
+      let exitReason = '';
+      let exitPrice = 0;
+      
+      if (s.allDone) {
+        exitReason = 'all_tps_hit';
+        exitPrice = s.tp3; // Last TP price
+      } else if (s.slHit) {
+        // Check if SL was hit by EMA flip (price = s.entry in flip alert) or actual SL
+        const lastAlert = alerts.find(a => a.timeframe === l && a.type === 'sl' && a.cycle === s.cycle);
+        if (lastAlert && lastAlert.sl === s.entry) {
+          exitReason = 'ema_flip';
+          exitPrice = lastAlert.price || s.entry;
+        } else {
+          exitReason = 'sl_hit';
+          exitPrice = s.sl;
+        }
+      }
+      
+      await recordTradeHistory(s, l, exitPrice, exitReason);
     }
   }
 
