@@ -65,6 +65,14 @@ When user says:
 - "write python" / "python code for X" -> use PYTHON skill
 - "query database" / "SQL" / "select from" -> use SQL_QUERY skill
 - "write [language] code" / "convert to [language]" / "debug this" / "review this code" / "optimize" -> use CODE skill
+- "agent, do X" / "add feature X" / "build X in the repo" / "refactor the codebase" -> use CODING_AGENT skill
+
+### Coding Agent Skill (Freebuff-style — /api/agent)
+30. CODING_AGENT — Describe what you want, agent reads repo files, plans changes, and applies them to GitHub. Like Freebuff/Claude Code but in chat.
+   - POST /api/agent {mode:"plan", instruction:"add dark mode toggle to dashboard"} — preview what will change
+   - POST /api/agent {mode:"execute", instruction:"..."} — apply changes to GitHub
+   - POST /api/agent {mode:"chat", instruction:"how does the alert system work?"} — ask about codebase
+   Supports: create, edit, delete files across the entire repo with AI-generated code.
 
 For HTML_CSS_EDITOR:
 - Available at /api/editor endpoint
@@ -275,6 +283,8 @@ function detectIntent(message) {
   if (msg.match(/optimize.*code|improve.*performance|refactor/)) intents.push('code_optimize');
   if (msg.match(/unit.*test|generate.*test|test.*case/)) intents.push('code_test');
   if (msg.match(/complexity|big.*o|time.*complexity|space.*complexity/)) intents.push('code_complexity');
+  // Coding agent intent (freebuff-style)
+  if (msg.match(/agent.*do|add.*feature|build.*in.*repo|refactor.*code|agent.*code|code.*agent|freebuff/)) intents.push('coding_agent');
   // If no specific intent detected, it's a general question (ChatGPT mode)
   if (intents.length === 0) intents.push('general');
   return intents;
@@ -425,6 +435,11 @@ async function buildContext(userMessage) {
     if (intents.includes('code_complexity')) codeActions.push('analyze complexity');
     parts.push(`=== CODE SKILL READY ===\nUser wants: ${codeActions.join(', ')}. Use POST /api/code with appropriate mode. Supported modes: generate, edit, debug, explain, convert, optimize, review, test, complexity, snippet. Ask for the code or language if not provided.`);
   }
+  // Coding agent context
+  if (intents.includes('coding_agent')) {
+    actions.push('coding_agent');
+    parts.push('=== CODING AGENT READY (Freebuff-style) ===\nUser wants the agent to make code changes. Use POST /api/agent: mode=plan first to preview, then mode=execute to apply. mode=chat for questions about the codebase. The agent can read, create, edit, and delete files in the repo.');
+  }
   if (intents.includes('general')) {
     // General ChatGPT mode — no Supabase data needed, just use LLM knowledge
     parts.push('=== GENERAL MODE ===\nNo trading intent detected. Respond as a general AI assistant (like ChatGPT). Answer the question directly using your knowledge. Be helpful, concise, and natural. Use markdown formatting when useful.');
@@ -561,7 +576,7 @@ export default async function handler(req, res) {
     if (skillResults.memory) skillContext += `\n\n=== MEMORY STORED ===\n${skillResults.memory.success ? 'Saved' : 'Failed: ' + skillResults.memory.error}`;
 
     const hasIDE = intents.some(i => i.startsWith('ide_'));
-    const hasCodeSkill = intents.includes('python') || intents.includes('sql_query') || intents.includes('code_gen') || intents.includes('code_convert') || intents.includes('code_debug') || intents.includes('code_explain') || intents.includes('code_review') || intents.includes('code_optimize') || intents.includes('code_test') || intents.includes('code_complexity');
+    const hasCodeSkill = intents.includes('python') || intents.includes('sql_query') || intents.includes('code_gen') || intents.includes('code_convert') || intents.includes('code_debug') || intents.includes('code_explain') || intents.includes('code_review') || intents.includes('code_optimize') || intents.includes('code_test') || intents.includes('code_complexity') || intents.includes('coding_agent');
     const isGeneral = intents.includes('general') && !intents.includes('live_price') && !intents.includes('active_trades') && !intents.includes('trade_history') && !intents.includes('alerts') && !intents.includes('ai_analysis') && !intents.includes('market_analysis') && !intents.includes('trade_performance') && !hasIDE && !hasCodeSkill;
     
     // Use lightweight prompt for general, IDE, and code skill queries to save tokens
