@@ -584,6 +584,10 @@ export default async function handler(req, res) {
     const { message, history = [], stream = false } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
+    // Model selection: ?model=groq|ollama or body.model, default groq
+    const modelKey = (req.query.model || req.body.model || 'groq').toLowerCase();
+    const activeModel = AVAILABLE_MODELS[modelKey] || AVAILABLE_MODELS.groq;
+
     const { context, actions, intents } = await buildContext(message);
 
     let skillResults = {};
