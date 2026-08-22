@@ -139,7 +139,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,
 <script>
 var API = window.location.origin + '/api/chat';
 var CHART_API = window.location.origin + '/api/chart';
-var history = [];
+var chatHistory = [];
 var sending = false;
 
 var chatWrap = document.getElementById('chatWrap');
@@ -233,81 +233,72 @@ function removeTyping() {
 }
 
 function send() {
-  if (sending) return;
-  var message = inputEl.value.trim();
-  if (!message) return;
-  sending = true;
-  sendBtn.disabled = true;
-  inputEl.value = '';
-  inputEl.style.height = 'auto';
-  
-  addMsg(message, 'user');
-  history.push({ role: 'user', content: message });
-  addTyping();
-  
-  var retries = 0;
-  var maxRetries = 3;
-  
-  function doFetch() {
+  try {
+    if (sending) return;
+    var message = inputEl.value.trim();
+    if (!message) return;
+    sending = true;
+    sendBtn.disabled = true;
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    
+    addMsg(message, 'user');
+    chatHistory.push({ role: 'user', content: message });
+    
+    // Add typing indicator
+    if (welcome) welcome.style.display = 'none';
+    var typingDiv = document.createElement('div');
+    typingDiv.className = 'typing';
+    typingDiv.id = 'typing';
+    typingDiv.innerHTML = '<div class="ta">🎯</div><div class="td"><span></span><span></span><span></span></div>';
+    chatWrap.appendChild(typingDiv);
+    chatArea.scrollTop = chatArea.scrollHeight;
+    
+    var retries = 0;
     fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message, history: history.slice(-10), stream: false })
+      body: JSON.stringify({ message: message, history: chatHistory.slice(-10), stream: false })
     }).then(function(res) {
-      if (res.status === 429 && retries < maxRetries) {
-        retries++;
-        var te = document.getElementById('typing');
-        if (te) te.innerHTML = '<div class="ta">🎯</div><span style="color:var(--muted);font-size:13px">Retrying (' + retries + '/3)...</span>';
-        setTimeout(doFetch, 15000);
-        return;
-      }
       if (!res.ok) {
-        removeTyping();
-        res.json().then(function(err) {
-          addMsg('⚠️ ' + (err.details || err.error || 'Server error'), 'assistant');
-        }).catch(function() {
-          addMsg('⚠️ Server error. Please try again.', 'assistant');
+        return res.text().then(function(t) {
+          dlog('10.err: ' + t.slice(0,100));
+          typingDiv.remove();
+          addMsg('Error: ' + t.slice(0,200), 'assistant');
+          sending = false;
+          sendBtn.disabled = false;
         });
-        history.pop();
-        return;
       }
-      
-      removeTyping();
-      res.json().then(function(data) {
-        if (data.error) {
-          if (retries < maxRetries && (data.error.indexOf('Rate') !== -1 || data.error.indexOf('LLM') !== -1)) {
-            retries++;
-            addTyping();
-            setTimeout(doFetch, 15000);
-            return;
-          }
-          addMsg('⚠️ ' + (data.details || data.error), 'assistant');
-          history.pop();
-        } else if (data.reply) {
-          addMsg(data.reply, 'assistant');
-          history.push({ role: 'assistant', content: data.reply });
-        } else {
-          addMsg('⚠️ Unexpected response format', 'assistant');
-        }
-        sending = false;
-        sendBtn.disabled = false;
-        inputEl.focus();
-      }).catch(function(e) {
-        addMsg('⚠️ Could not parse response. Please try again.', 'assistant');
-        sending = false;
-        sendBtn.disabled = false;
-        inputEl.focus();
-      });
+      typingDiv.remove();
+      return res.json();
+    }).then(function(data) {
+      if (!data) { return; }
+      dlog('13.reply: ' + (data.reply ? 'YES' : 'NO'));
+      if (data.reply) {
+        addMsg(data.reply, 'assistant');
+        chatHistory.push({ role: 'assistant', content: data.reply });
+      } else if (data.error) {
+        addMsg('Error: ' + data.error, 'assistant');
+      }
+      sending = false;
+      sendBtn.disabled = false;
+      inputEl.focus();
     }).catch(function(err) {
-      removeTyping();
-      addMsg('⚠️ Connection error: ' + err.message, 'assistant');
+      var tp = document.getElementById('typing');
+      if (tp) tp.remove();
+      addMsg('Connection error: ' + err.message, 'assistant');
       sending = false;
       sendBtn.disabled = false;
       inputEl.focus();
     });
+  } catch(e) {
+    console.error('Send error:', e);
+    var tp = document.getElementById('typing');
+    if (tp) tp.remove();
+    addMsg('Error: ' + e.message, 'assistant');
+    sending = false;
+    sendBtn.disabled = false;
   }
-  
-  doFetch();
 }
 
 // Charts
