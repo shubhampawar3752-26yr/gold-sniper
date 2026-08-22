@@ -252,7 +252,7 @@ function send() {
     fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message, history: history.slice(-10), stream: true })
+      body: JSON.stringify({ message: message, history: history.slice(-10), stream: false })
     }).then(function(res) {
       if (res.status === 429 && retries < maxRetries) {
         retries++;
@@ -272,75 +272,32 @@ function send() {
         return;
       }
       
-      var ct = res.headers.get('content-type') || '';
-      if (ct.indexOf('application/json') !== -1) {
-        removeTyping();
-        res.json().then(function(data) {
-          if (data.error) {
-            if (retries < maxRetries && data.error.indexOf('Rate') !== -1) {
-              retries++;
-              addTyping();
-              setTimeout(doFetch, 15000);
-              return;
-            }
-            addMsg('⚠️ ' + (data.details || data.error), 'assistant');
-            history.pop();
-            return;
-          }
-          if (data.reply) {
-            addMsg(data.reply, 'assistant');
-            history.push({ role: 'assistant', content: data.reply });
-          }
-        });
-        return;
-      }
-      
       removeTyping();
-      var contentEl = addMsg('', 'assistant');
-      var fullText = '';
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-      
-      function readChunk() {
-        reader.read().then(function(result) {
-          if (result.done) {
-            if (!fullText) contentEl.innerHTML = '⚠️ No response received. Please try again.';
-            else history.push({ role: 'assistant', content: fullText });
-            sending = false;
-            sendBtn.disabled = false;
-            inputEl.focus();
+      res.json().then(function(data) {
+        if (data.error) {
+          if (retries < maxRetries && (data.error.indexOf('Rate') !== -1 || data.error.indexOf('LLM') !== -1)) {
+            retries++;
+            addTyping();
+            setTimeout(doFetch, 15000);
             return;
           }
-          buffer += decoder.decode(result.value, { stream: true });
-          var lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (var i = 0; i < lines.length; i++) {
-            var line = lines[i];
-            if (line.indexOf('data: ') === 0) {
-              var d = line.slice(6).trim();
-              if (d === '[DONE]') continue;
-              try {
-                var p = JSON.parse(d);
-                if (p.error) {
-                  contentEl.innerHTML = '⚠️ ' + p.error;
-                  sending = false;
-                  sendBtn.disabled = false;
-                  inputEl.focus();
-                  return;
-                }
-                if (p.content) {
-                  fullText += p.content;
-                  contentEl.innerHTML = parseMd(fullText);
-                  chatArea.scrollTop = chatArea.scrollHeight;
-                }
-              } catch(e) {}
-            }
-          }
-          readChunk();
-        });
-      }
-      readChunk();
+          addMsg('⚠️ ' + (data.details || data.error), 'assistant');
+          history.pop();
+        } else if (data.reply) {
+          addMsg(data.reply, 'assistant');
+          history.push({ role: 'assistant', content: data.reply });
+        } else {
+          addMsg('⚠️ Unexpected response format', 'assistant');
+        }
+        sending = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }).catch(function(e) {
+        addMsg('⚠️ Could not parse response. Please try again.', 'assistant');
+        sending = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+      });
     }).catch(function(err) {
       removeTyping();
       addMsg('⚠️ Connection error: ' + err.message, 'assistant');
