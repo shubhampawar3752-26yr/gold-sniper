@@ -138,6 +138,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,
 
 <script>
 var API = window.location.origin + '/api/chat';
+        var currentModel = 'groq';
 var CHART_API = window.location.origin + '/api/chart';
 var chatHistory = [];
 var sending = false;
@@ -275,7 +276,8 @@ function send() {
       if (!data) { return; }
 
       if (data.reply) {
-        addMsg(data.reply, 'assistant');
+        var badge = data.provider === 'ollama' ? ' 🦙' : ' ⚡';
+        addMsg(data.reply + '\n\n_— ' + data.model + badge + '_', 'assistant');
         chatHistory.push({ role: 'assistant', content: data.reply });
       } else if (data.error) {
         addMsg('Error: ' + data.error, 'assistant');

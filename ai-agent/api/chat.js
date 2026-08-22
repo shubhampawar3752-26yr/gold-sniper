@@ -2,6 +2,15 @@
 // Auth + Groq LLM + Supabase memory & trading data
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+
+// ── Model Provider Config ──
+// Supports Groq (cloud) and Ollama (local) — switch via ?model=ollama or body.model
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/chat';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'ornith-1.5:9b';
+const AVAILABLE_MODELS = {
+  groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', key: GROQ_API_KEY, provider: 'groq', label: 'GPT-OSS-120B (Groq)' },
+  ollama: { url: OLLAMA_URL, model: OLLAMA_MODEL, key: null, provider: 'ollama', label: 'Ornith 1.5 9B (Ollama)' },
+};
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = process.env.GITHUB_REPO || 'shubhampawar3752-26yr/gold-sniper';
 const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN;
@@ -9,7 +18,6 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://schegpkwfwkgfmmpnzic.s
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'openai/gpt-oss-120b';
 
 const SYSTEM_PROMPT = `You are Lyra — Shubham's personal AI assistant. You have TWO modes:
 
@@ -549,6 +557,23 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Auth-Token, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
+  
+  // GET: List available models
+  if (req.method === 'GET') {
+    const url = new URL(req.url, 'http://localhost');
+    if (url.searchParams.get('action') === 'models') {
+      return res.status(200).json({
+        models: Object.entries(AVAILABLE_MODELS).map(([k, v]) => ({
+          id: k,
+          label: v.label,
+          provider: v.provider,
+          model: v.model,
+        })),
+        default: 'groq',
+      });
+    }
+    return res.status(400).json({ error: 'Use ?action=models' });
+  }
 
   // Auth check
   // Auth removed — open access
@@ -594,12 +619,17 @@ export default async function handler(req, res) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      const groqRes = await fetch(GROQ_URL, {
+      const isOllama = activeModel.provider === 'ollama';
+      const llmRes = await fetch(activeModel.url, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 2048, stream: true }),
+        headers: activeModel.key 
+          ? { 'Authorization': `Bearer ${activeModel.key}`, 'Content-Type': 'application/json' }
+          : { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isOllama 
+          ? { model: activeModel.model, messages, temperature: 0.7, stream: true }
+          : { model: activeModel.model, messages, temperature: 0.7, max_tokens: 2048, stream: true }),
       });
-      if (!groqRes.ok) { 
+      if (!llmRes.ok) { 
         const err = await groqRes.text(); 
         // Check if it's a rate limit error
         try { const e = JSON.parse(err); if (e.error?.code === 'rate_limit_exceeded') { return res.status(429).json({ error: 'Rate limited', details: 'AI is busy. Please wait a few seconds and try again.' }); } } catch {}
@@ -636,10 +666,10 @@ export default async function handler(req, res) {
       headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: hasIDE ? 1024 : 2048, stream: false }),
     });
-    if (!groqRes.ok) { const err = await groqRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
+    if (!llmRes.ok) { const err = await groqRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
     const groqData = await groqRes.json();
     const reply = groqData.choices?.[0]?.message?.content || 'No response';
-    return res.status(200).json({ reply, model: MODEL, intents, skills: { whatsapp: skillResults.whatsapp || null, memory: skillResults.memory || null }, timestamp: new Date().toISOString() });
+    return res.status(200).json({ reply, model: activeModel.label, provider: activeModel.provider, modelKey, intents, skills: { whatsapp: skillResults.whatsapp || null, memory: skillResults.memory || null }, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('Agent error:', error);
     return res.status(500).json({ error: 'Agent error', details: error.message });
