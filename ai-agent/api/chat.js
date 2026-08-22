@@ -2,6 +2,8 @@
 // Auth + Groq LLM + Supabase memory & trading data
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GITHUB_REPO = process.env.GITHUB_REPO || 'shubhampawar3752-26yr/gold-sniper';
 const AUTH_TOKEN = process.env.AGENT_AUTH_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://schegpkwfwkgfmmpnzic.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -31,6 +33,8 @@ Key facts:
 - TradingView scanner API for EMA/ATR/RSI indicators
 
 You have these SKILLS:
+
+### Trading Skills
 1. LIVE_PRICE — fetch real-time gold spot price
 2. ACTIVE_TRADES — show all open trades with entry/SL/TP/status
 3. TRADE_HISTORY — query closed trades with PnL
@@ -43,7 +47,9 @@ You have these SKILLS:
 10. TRADE_PERFORMANCE — aggregate stats (win rate, avg PnL, etc.)
 11. DATA_VISUALIZATION — view charts and stats (available at /Charts tab)
 12. DATABASE_CRUD — insert, update, delete, query records in Supabase tables
-13. HTML_CSS_EDITOR — read, edit, and push HTML/CSS/JS files to GitHub via natural language
+
+### IDE Skills (14 skills via /api/ide)
+13-26: Full IDE — file tree, read/write/delete/move files, code search, AI-powered edits, batch edit, branches, commit history, branch compare, repo info. Always preview before applying edits. Confirm before deletes.
 
 For HTML_CSS_EDITOR:
 - Available at /api/editor endpoint
@@ -227,7 +233,20 @@ function detectIntent(message) {
   if (msg.match(/analyz|overview|summary|how.*market|market.*summary/)) intents.push('market_analysis');
   if (msg.match(/tp.*hit|take profit/) || msg.match(/sl.*hit|stop loss/)) intents.push('active_trades');
   if (msg.match(/insert|add.*record|create.*record|update.*record|delete.*record|query.*table|database|db /)) intents.push('database');
-  if (msg.match(/edit.*html|edit.*css|change.*color|change.*layout|update.*dashboard|modify.*page|edit.*file|fix.*css|style/)) intents.push('editor');
+  // IDE intents
+  if (msg.match(/file tree|project structure|show.*files|list.*files|directory|repo structure/)) intents.push('ide_tree');
+  if (msg.match(/read.*file|open.*file|show.*file|view.*file|show.*code|see.*file/) || msg.match(/\.(html|js|css|json|md|py|ts|tsx)$/)) intents.push('ide_read');
+  if (msg.match(/create.*file|new.*file|make.*file|add.*file/)) intents.push('ide_write');
+  if (msg.match(/delete.*file|remove.*file|drop.*file/)) intents.push('ide_delete');
+  if (msg.match(/search.*code|find.*code|grep|search.*repo|search.*in.*file/)) intents.push('ide_search');
+  if (msg.match(/edit.*file|edit.*html|edit.*css|change.*color|change.*layout|update.*dashboard|modify.*page|fix.*css|fix.*html|make.*background|make.*dark|make.*light|style|refactor/)) intents.push('ide_edit');
+  if (msg.match(/list.*branch|show.*branch|git.*branch/)) intents.push('ide_branches');
+  if (msg.match(/create.*branch|new.*branch|make.*branch/)) intents.push('ide_branch_create');
+  if (msg.match(/commit.*history|recent.*commit|show.*commit|git.*log|changelog/)) intents.push('ide_commits');
+  if (msg.match(/compare.*branch|diff.*branch/)) intents.push('ide_compare');
+  if (msg.match(/rename.*file|move.*file/)) intents.push('ide_move');
+  if (msg.match(/batch.*edit|edit.*multiple|edit.*all.*files/)) intents.push('ide_batch');
+  if (msg.match(/repo.*info|about.*repo|about.*project|project.*info/)) intents.push('ide_info');
   // If no specific intent detected, it's a general question (ChatGPT mode)
   if (intents.length === 0) intents.push('general');
   return intents;
@@ -298,9 +317,61 @@ async function buildContext(userMessage) {
       parts.push(`=== DATABASE COMMAND DETECTED ===\nAction: ${dbCmd.action}\nTable: ${dbCmd.table || 'unknown'}\nAvailable tables: trade_history, alerts, ai_candle_analysis, engine_logs, conversation_memories, active_trades\nTell the user what you detected and ask for confirmation before executing writes/deletes.`);
     }
   }
-  if (intents.includes('editor')) {
-    actions.push('editor');
-    parts.push('=== HTML/CSS EDITOR READY ===\nUser wants to edit HTML/CSS. Ask which file to edit if not specified. Available files: index.html (dashboard), ai-agent/index.html (AI agent UI), styles.css, etc. Use /api/editor to read and modify files. ALWAYS preview before applying.');
+  // IDE context — fetch real data
+  const hasIDE = intents.some(i => i.startsWith('ide_'));
+  if (hasIDE) {
+    actions.push('ide');
+    let ideParts = ['=== IDE FEATURES ACTIVE ==='];
+    try {
+      const treeRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO.split('/')[0]}/${GITHUB_REPO.split('/')[1]}/git/trees/main?recursive=1`, {
+        headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' },
+      });
+      if (treeRes.ok) {
+        const treeData = await treeRes.json();
+        const files = treeData.tree.filter(t => t.type === 'blob').map(t => t.path);
+        ideParts.push(`=== REPO FILE TREE (${files.length} files) ===\n${files.join('\n')}`);
+      }
+    } catch (e) { ideParts.push('Could not fetch repo tree'); }
+    if (intents.includes('ide_read')) {
+      const pathMatch = userMessage.match(/([\w\/]+\.(html|js|css|json|md|py|ts|tsx))/);
+      if (pathMatch) {
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/main/${pathMatch[1]}`;
+          const fileRes = await fetch(rawUrl);
+          if (fileRes.ok) {
+            const fileContent = await fileRes.text();
+            ideParts.push(`=== FILE: ${pathMatch[1]} (${fileContent.length} bytes) ===\n${fileContent.slice(0, 8000)}`);
+          }
+        } catch (e) {}
+      }
+    }
+    if (intents.includes('ide_branches')) {
+      try {
+        const brRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/branches`, {
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' },
+        });
+        if (brRes.ok) {
+          const branches = await brRes.json();
+          ideParts.push(`=== BRANCHES ===\n${branches.map(b => b.name).join(', ')}`);
+        }
+      } catch (e) {}
+    }
+    if (intents.includes('ide_commits')) {
+      try {
+        const cmRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/commits?per_page=10`, {
+          headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'Accept': 'application/vnd.github.v3+json' },
+        });
+        if (cmRes.ok) {
+          const commits = await cmRes.json();
+          ideParts.push(`=== RECENT COMMITS ===\n${commits.map(c => c.sha.slice(0,7) + ' ' + c.commit.message.split('\n')[0] + ' (' + c.commit.author.date + ')').join('\n')}`);
+        }
+      } catch (e) {}
+    }
+    ideParts.push('\n=== IDE INSTRUCTIONS ===\nYou can use /api/ide for file operations:');
+    ideParts.push('GET /api/ide?action=tree | GET /api/ide?action=read&path=X');
+    ideParts.push('POST /api/ide action=write {path,content} | POST /api/ide action=delete {path}');
+    ideParts.push('POST /api/ide action=ai-edit {path,instruction,preview:true} — ALWAYS preview first');
+    parts.push(ideParts.join('\n'));
   }
   if (intents.includes('general')) {
     // General ChatGPT mode — no Supabase data needed, just use LLM knowledge
@@ -437,9 +508,11 @@ export default async function handler(req, res) {
     if (skillResults.whatsapp) skillContext += `\n\n=== WHATSAPP RESULT ===\n${skillResults.whatsapp.success ? 'Sent successfully' : 'Failed: ' + skillResults.whatsapp.error}`;
     if (skillResults.memory) skillContext += `\n\n=== MEMORY STORED ===\n${skillResults.memory.success ? 'Saved' : 'Failed: ' + skillResults.memory.error}`;
 
-    const isGeneral = intents.includes('general') && !intents.includes('live_price') && !intents.includes('active_trades') && !intents.includes('trade_history') && !intents.includes('alerts') && !intents.includes('ai_analysis') && !intents.includes('market_analysis') && !intents.includes('trade_performance');
+    const hasIDE = intents.some(i => i.startsWith('ide_'));
+    const isGeneral = intents.includes('general') && !intents.includes('live_price') && !intents.includes('active_trades') && !intents.includes('trade_history') && !intents.includes('alerts') && !intents.includes('ai_analysis') && !intents.includes('market_analysis') && !intents.includes('trade_performance') && !hasIDE;
     
-    const systemContent = isGeneral 
+    // Use lightweight prompt for general AND IDE queries to save tokens
+    const systemContent = (isGeneral || hasIDE)
       ? `${LIGHTWEIGHT_PROMPT}\n\n${skillContext ? '=== RELEVANT CONTEXT ===\n' + skillContext : ''}`
       : `${SYSTEM_PROMPT}\n\n=== REAL-TIME CONTEXT FROM SUPABASE ===\n${skillContext}`;
     
@@ -493,7 +566,7 @@ export default async function handler(req, res) {
     const groqRes = await fetch(GROQ_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: 2048, stream: false }),
+      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: hasIDE ? 1024 : 2048, stream: false }),
     });
     if (!groqRes.ok) { const err = await groqRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
     const groqData = await groqRes.json();
