@@ -262,7 +262,7 @@ function send() {
     }).then(function(res) {
       if (!res.ok) {
         return res.text().then(function(t) {
-          dlog('10.err: ' + t.slice(0,100));
+
           typingDiv.remove();
           addMsg('Error: ' + t.slice(0,200), 'assistant');
           sending = false;
@@ -273,7 +273,7 @@ function send() {
       return res.json();
     }).then(function(data) {
       if (!data) { return; }
-      dlog('13.reply: ' + (data.reply ? 'YES' : 'NO'));
+
       if (data.reply) {
         addMsg(data.reply, 'assistant');
         chatHistory.push({ role: 'assistant', content: data.reply });
