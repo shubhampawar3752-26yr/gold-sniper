@@ -664,7 +664,7 @@ export default async function handler(req, res) {
     const groqRes = await fetch(GROQ_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages, temperature: 0.7, max_tokens: hasIDE ? 1024 : 2048, stream: false }),
+      body: JSON.stringify(isOllama ? { model: activeModel.model, messages, temperature: 0.7, stream: false } : { model: activeModel.model, messages, temperature: 0.7, max_tokens: hasIDE ? 1024 : 2048, stream: false }),
     });
     if (!llmRes.ok) { const err = await groqRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
     const groqData = await groqRes.json();
