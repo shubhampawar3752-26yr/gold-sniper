@@ -620,7 +620,7 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       const isOllama = activeModel.provider === 'ollama';
-      const llmRes = await fetch(activeModel.url, {
+    const llmRes = await fetch(activeModel.url, {
         method: 'POST',
         headers: activeModel.key 
           ? { 'Authorization': `Bearer ${activeModel.key}`, 'Content-Type': 'application/json' }
@@ -630,14 +630,14 @@ export default async function handler(req, res) {
           : { model: activeModel.model, messages, temperature: 0.7, max_tokens: 2048, stream: true }),
       });
       if (!llmRes.ok) { 
-        const err = await groqRes.text(); 
+        const err = await llmRes.text(); 
         // Check if it's a rate limit error
         try { const e = JSON.parse(err); if (e.error?.code === 'rate_limit_exceeded') { return res.status(429).json({ error: 'Rate limited', details: 'AI is busy. Please wait a few seconds and try again.' }); } } catch {}
         res.write(`data: ${JSON.stringify({ error: 'AI error: ' + err.substring(0, 200) })}\n\n`); 
         res.write('data: [DONE]\n\n');
         return res.end(); 
       }
-      const reader = groqRes.body.getReader();
+      const reader = llmRes.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       while (true) {
@@ -661,14 +661,19 @@ export default async function handler(req, res) {
       return res.end();
     }
 
-    const groqRes = await fetch(GROQ_URL, {
+    const isOllama = activeModel.provider === 'ollama';
+    const llmRes = await fetch(activeModel.url, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(isOllama ? { model: activeModel.model, messages, temperature: 0.7, stream: false } : { model: activeModel.model, messages, temperature: 0.7, max_tokens: hasIDE ? 1024 : 2048, stream: false }),
+      headers: activeModel.key 
+        ? { 'Authorization': `Bearer ${activeModel.key}`, 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' },
+      body: JSON.stringify(isOllama
+        ? { model: activeModel.model, messages, temperature: 0.7, stream: false }
+        : { model: activeModel.model, messages, temperature: 0.7, max_tokens: hasIDE ? 1024 : 2048, stream: false }),
     });
-    if (!llmRes.ok) { const err = await groqRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
-    const groqData = await groqRes.json();
-    const reply = groqData.choices?.[0]?.message?.content || 'No response';
+    if (!llmRes.ok) { const err = await llmRes.text(); return res.status(500).json({ error: 'LLM error', details: err }); }
+    const llmData = await llmRes.json();
+    const reply = llmData.choices?.[0]?.message?.content || llmData.message?.content || 'No response';
     return res.status(200).json({ reply, model: activeModel.label, provider: activeModel.provider, modelKey, intents, skills: { whatsapp: skillResults.whatsapp || null, memory: skillResults.memory || null }, timestamp: new Date().toISOString() });
   } catch (error) {
     console.error('Agent error:', error);
