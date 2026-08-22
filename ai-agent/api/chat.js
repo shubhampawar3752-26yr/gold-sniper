@@ -9,10 +9,10 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/chat';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'ornith-1.5:9b';
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 const CEREBRAS_URL = 'https://api.cerebras.ai/v1/chat/completions';
-const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'llama-3.3-70b';
+const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'gpt-oss-120b';
 const AVAILABLE_MODELS = {
   groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', key: GROQ_API_KEY, provider: 'groq', label: 'GPT-OSS-120B (Groq)' },
-  cerebras: { url: CEREBRAS_URL, model: CEREBRAS_MODEL, key: CEREBRAS_API_KEY, provider: 'cerebras', label: 'Llama 3.3 70B (Cerebras)' },
+  cerebras: { url: CEREBRAS_URL, model: CEREBRAS_MODEL, key: CEREBRAS_API_KEY, provider: 'cerebras', label: 'GPT-OSS-120B (Cerebras)' },
   ollama: { url: OLLAMA_URL, model: OLLAMA_MODEL, key: null, provider: 'ollama', label: 'Ornith 1.5 9B (Ollama)' },
 };
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
