@@ -51,6 +51,21 @@ You have these SKILLS:
 ### IDE Skills (14 skills via /api/ide)
 13-26: Full IDE — file tree, read/write/delete/move files, code search, AI-powered edits, batch edit, branches, commit history, branch compare, repo info. Always preview before applying edits. Confirm before deletes.
 
+### Python Skill (via /api/python)
+27. PYTHON — Generate, analyze, and preview Python code. Modes: generate (NL→Python), preview (analyze code). POST /api/python {mode, code}
+
+### SQL Query Skill (via /api/sql)
+28. SQL_QUERY — Execute SQL queries, generate SQL from natural language, analyze results, aggregate stats. POST /api/sql {mode, table, sql, natural}. GET /api/sql?action=schemas for table info.
+
+### Universal Code Skill — All Languages (via /api/code)
+29. CODE — Full programming support for 35+ languages. Modes: generate, edit, debug, explain, convert, optimize, review, test, complexity, snippet. POST /api/code {mode, language, code, instruction}. GET /api/code?action=languages for list.
+Supported: Python, JS, TS, SQL, HTML, CSS, JSON, Bash, PHP, Java, C, C++, C#, Go, Rust, Ruby, Swift, Kotlin, R, Dart, YAML, Lua, Perl, Scala, Haskell, Elixir, Clojure, Solidity, Vue, Svelte, React, GraphQL, Dockerfile, and more.
+
+When user says:
+- "write python" / "python code for X" -> use PYTHON skill
+- "query database" / "SQL" / "select from" -> use SQL_QUERY skill
+- "write [language] code" / "convert to [language]" / "debug this" / "review this code" / "optimize" -> use CODE skill
+
 For HTML_CSS_EDITOR:
 - Available at /api/editor endpoint
 - GET /api/editor?path=index.html — read a file from the GitHub repo
@@ -247,6 +262,19 @@ function detectIntent(message) {
   if (msg.match(/rename.*file|move.*file/)) intents.push('ide_move');
   if (msg.match(/batch.*edit|edit.*multiple|edit.*all.*files/)) intents.push('ide_batch');
   if (msg.match(/repo.*info|about.*repo|about.*project|project.*info/)) intents.push('ide_info');
+  // Python skill
+  if (msg.match(/python.*code|write.*python|py.*script|pip|numpy|pandas|matplotlib/)) intents.push('python');
+  // SQL query skill
+  if (msg.match(/sql.*query|query.*database|select.*from|insert.*into|run.*query|sql.*command/)) intents.push('sql_query');
+  // Universal code skill (all languages)
+  if (msg.match(/write.*(javascript|typescript|java|c\+\+|golang|rust|ruby|swift|kotlin|php|dart|scala|haskell|elixir|clojure|solidity|vue|svelte|graphql)/)) intents.push('code_gen');
+  if (msg.match(/convert.*to.*(python|javascript|typescript|java|go|rust|ruby|cpp|c\+\+)/)) intents.push('code_convert');
+  if (msg.match(/debug.*code|find.*bug|fix.*error|stack.*trace/)) intents.push('code_debug');
+  if (msg.match(/explain.*code|how.*code.*work|what.*does.*code/)) intents.push('code_explain');
+  if (msg.match(/review.*code|code.*review|check.*quality/)) intents.push('code_review');
+  if (msg.match(/optimize.*code|improve.*performance|refactor/)) intents.push('code_optimize');
+  if (msg.match(/unit.*test|generate.*test|test.*case/)) intents.push('code_test');
+  if (msg.match(/complexity|big.*o|time.*complexity|space.*complexity/)) intents.push('code_complexity');
   // If no specific intent detected, it's a general question (ChatGPT mode)
   if (intents.length === 0) intents.push('general');
   return intents;
@@ -372,6 +400,30 @@ async function buildContext(userMessage) {
     ideParts.push('POST /api/ide action=write {path,content} | POST /api/ide action=delete {path}');
     ideParts.push('POST /api/ide action=ai-edit {path,instruction,preview:true} — ALWAYS preview first');
     parts.push(ideParts.join('\n'));
+  }
+  // Python skill context
+  if (intents.includes('python')) {
+    actions.push('python');
+    parts.push('=== PYTHON SKILL READY ===\nUser wants Python code. Use POST /api/python with mode=generate to create code, or mode=preview to analyze. Ask what they want the code to do.');
+  }
+  // SQL query skill context
+  if (intents.includes('sql_query')) {
+    actions.push('sql');
+    parts.push('=== SQL QUERY SKILL READY ===\nUser wants to run SQL queries. Available tables: trade_history, alerts, active_trades, ai_candle_analysis, engine_logs, conversation_memories. Use POST /api/sql with mode=query or mode=generate (natural language to SQL). GET /api/sql?action=schemas for column info.');
+  }
+  // Universal code skill context
+  if (intents.includes('code_gen') || intents.includes('code_convert') || intents.includes('code_debug') || intents.includes('code_explain') || intents.includes('code_review') || intents.includes('code_optimize') || intents.includes('code_test') || intents.includes('code_complexity')) {
+    actions.push('code');
+    const codeActions = [];
+    if (intents.includes('code_gen')) codeActions.push('generate code');
+    if (intents.includes('code_convert')) codeActions.push('convert languages');
+    if (intents.includes('code_debug')) codeActions.push('debug/find bugs');
+    if (intents.includes('code_explain')) codeActions.push('explain code');
+    if (intents.includes('code_review')) codeActions.push('review code');
+    if (intents.includes('code_optimize')) codeActions.push('optimize code');
+    if (intents.includes('code_test')) codeActions.push('generate tests');
+    if (intents.includes('code_complexity')) codeActions.push('analyze complexity');
+    parts.push(`=== CODE SKILL READY ===\nUser wants: ${codeActions.join(', ')}. Use POST /api/code with appropriate mode. Supported modes: generate, edit, debug, explain, convert, optimize, review, test, complexity, snippet. Ask for the code or language if not provided.`);
   }
   if (intents.includes('general')) {
     // General ChatGPT mode — no Supabase data needed, just use LLM knowledge
@@ -509,10 +561,11 @@ export default async function handler(req, res) {
     if (skillResults.memory) skillContext += `\n\n=== MEMORY STORED ===\n${skillResults.memory.success ? 'Saved' : 'Failed: ' + skillResults.memory.error}`;
 
     const hasIDE = intents.some(i => i.startsWith('ide_'));
-    const isGeneral = intents.includes('general') && !intents.includes('live_price') && !intents.includes('active_trades') && !intents.includes('trade_history') && !intents.includes('alerts') && !intents.includes('ai_analysis') && !intents.includes('market_analysis') && !intents.includes('trade_performance') && !hasIDE;
+    const hasCodeSkill = intents.includes('python') || intents.includes('sql_query') || intents.includes('code_gen') || intents.includes('code_convert') || intents.includes('code_debug') || intents.includes('code_explain') || intents.includes('code_review') || intents.includes('code_optimize') || intents.includes('code_test') || intents.includes('code_complexity');
+    const isGeneral = intents.includes('general') && !intents.includes('live_price') && !intents.includes('active_trades') && !intents.includes('trade_history') && !intents.includes('alerts') && !intents.includes('ai_analysis') && !intents.includes('market_analysis') && !intents.includes('trade_performance') && !hasIDE && !hasCodeSkill;
     
-    // Use lightweight prompt for general AND IDE queries to save tokens
-    const systemContent = (isGeneral || hasIDE)
+    // Use lightweight prompt for general, IDE, and code skill queries to save tokens
+    const systemContent = (isGeneral || hasIDE || hasCodeSkill)
       ? `${LIGHTWEIGHT_PROMPT}\n\n${skillContext ? '=== RELEVANT CONTEXT ===\n' + skillContext : ''}`
       : `${SYSTEM_PROMPT}\n\n=== REAL-TIME CONTEXT FROM SUPABASE ===\n${skillContext}`;
     
