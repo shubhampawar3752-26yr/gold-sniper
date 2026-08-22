@@ -10,9 +10,19 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'ornith-1.5:9b';
 const CEREBRAS_API_KEY = process.env.CEREBRAS_API_KEY;
 const CEREBRAS_URL = 'https://api.cerebras.ai/v1/chat/completions';
 const CEREBRAS_MODEL = process.env.CEREBRAS_MODEL || 'gpt-oss-120b';
+// Gemini (Google AI Studio — free, no card, 1,500 RPD on Flash)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Mistral (free Experiment tier, ~1B tokens/month, OpenAI-compatible)
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
+const MISTRAL_URL = 'https://api.mistral.ai/v1/chat/completions';
+const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
 const AVAILABLE_MODELS = {
   groq: { url: 'https://api.groq.com/openai/v1/chat/completions', model: 'openai/gpt-oss-120b', key: GROQ_API_KEY, provider: 'groq', label: 'GPT-OSS-120B (Groq)' },
   cerebras: { url: CEREBRAS_URL, model: CEREBRAS_MODEL, key: CEREBRAS_API_KEY, provider: 'cerebras', label: 'GPT-OSS-120B (Cerebras)' },
+  gemini: { url: GEMINI_URL, model: GEMINI_MODEL, key: GEMINI_API_KEY, provider: 'gemini', label: 'Gemini 2.5 Flash (Google)' },
+  mistral: { url: MISTRAL_URL, model: MISTRAL_MODEL, key: MISTRAL_API_KEY, provider: 'mistral', label: 'Mistral Small (Mistral AI)' },
   ollama: { url: OLLAMA_URL, model: OLLAMA_MODEL, key: null, provider: 'ollama', label: 'Ornith 1.5 9B (Ollama)' },
 };
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
