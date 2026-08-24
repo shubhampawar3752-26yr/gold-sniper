@@ -484,6 +484,22 @@ Deno.serve(async (req) => {
     if (s.tp4 !== undefined) { s.tp4 = 0; s.tp4Hit = false; }
     if (s.tp5 !== undefined) { s.tp5 = 0; s.tp5Hit = false; }
     if (s.allDone && s.tp3Hit && !s.tp1Hit) s.allDone = false; // reset allDone if it was set by 5-TP
+    
+    // Re-apply trailing SL if lost (TP1 hit but SL not at breakeven)
+    if (!s.slHit && !s.allDone && s.tp1Hit && s.entry > 0) {
+      if (!s.slMovedToBE || s.sl !== s.entry) {
+        s.originalSl = s.originalSl || s.sl; // Save original SL if not saved
+        s.sl = s.entry; // Move SL to entry (breakeven)
+        s.slMovedToBE = true;
+        console.log(`[${tf.l}] Fixup: SL moved to breakeven ($${s.sl})`);
+      }
+      // TP2 hit → SL should be at TP1
+      if (s.tp2Hit && s.tp1 > 0 && s.sl !== s.tp1) {
+        s.sl = s.tp1;
+        s.slMovedToTP1 = true;
+        console.log(`[${tf.l}] Fixup: SL moved to TP1 ($${s.sl})`);
+      }
+    }
   }
 
   // ── Fetch TradingView indicators (ONE HTTP call) ──
@@ -628,31 +644,41 @@ Deno.serve(async (req) => {
         console.log(`[${l}] All TPs hit — waiting: cooldown=${inAllTPCooldown} spread=${emaSpread.toFixed(2)} minReq=${minSpread.toFixed(2)}`);
       }
     }
-    // ── SL hit: wait for fresh EMA crossover before new trade ──
+    // ── SL hit: enter new trade on fresh crossover OR if EMA already flipped ──
     else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
       const crossUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21;
       const crossDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21;
+
+      // Also detect if EMA direction is already OPPOSITE to the closed trade direction
+      // (crossover happened gradually and was missed tick-by-tick)
+      const currentLong = ema9 > ema21;
+      const wasShortTrade = s.dir === 'short';
+      const wasLongTrade = s.dir === 'long';
+      const alreadyFlipped = (currentLong && wasShortTrade) || (!currentLong && wasLongTrade);
 
       const cooldownMs = FLIP_COOLDOWN_MS[l] || 0;
       const lastFlip = s.lastFlipTime ? new Date(s.lastFlipTime).getTime() : 0;
       const sinceLast = Date.now() - lastFlip;
       const inCooldown = cooldownMs > 0 && sinceLast < cooldownMs;
 
-      // Also check EMA spread for SL-hit crossover entries
+      // EMA spread filter
       const emaSpreadSL = Math.abs(ema9 - ema21);
       const minSpreadSL = atr * MIN_EMA_SPREAD_ATR_PCT;
       const spreadOKSL = emaSpreadSL >= minSpreadSL;
 
-      if ((crossUp || crossDn) && !inCooldown && spreadOKSL) {
+      // Enter on: fresh crossover OR already-flipped EMA (missed crossover)
+      const shouldEnter = ((crossUp || crossDn) || alreadyFlipped) && !inCooldown && spreadOKSL;
+
+      if (shouldEnter) {
         s.lastFlipTime = new Date().toISOString();
-        s.dir = crossUp ? 'long' : 'short';
+        s.dir = currentLong ? 'long' : 'short';
         s.cycle++;
         s.entry = tfPrice || livePrice || 0;
         s.atr = atr;
         s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
         s.slMovedToBE = false; s.slMovedToTP1 = false;
         s.slHit = s.allDone = false;
-        s.lastSignal = crossUp ? 'buy' : 'sell';
+        s.lastSignal = currentLong ? 'buy' : 'sell';
         setLevels(s, atr);
         s.entryTime = new Date().toISOString();
 
@@ -670,6 +696,7 @@ Deno.serve(async (req) => {
             cycle: s.cycle, price: tfPrice, sent: false,
           });
         }
+        console.log(`[${l}] New cycle ${s.cycle} (${s.lastSignal}) at $${s.entry} | trigger=${crossUp||crossDn ? 'crossover' : 'already-flipped'}`);
       }
     }
 
