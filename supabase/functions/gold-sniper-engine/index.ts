@@ -39,6 +39,19 @@ const FLIP_COOLDOWN_MS: Record<string, number> = {
   '4H':  60 * 60 * 1000,
 };
 
+// Cooldown after all TPs hit before starting next trade (prevents choppy entries)
+const ALLTP_COOLDOWN_MS: Record<string, number> = {
+  '1M':  2 * 60 * 1000,   // 2 min
+  '5M':  3 * 60 * 1000,   // 3 min
+  '15M': 5 * 60 * 1000,   // 5 min
+  '30M': 10 * 60 * 1000,  // 10 min
+  '1H':  15 * 60 * 1000,  // 15 min
+  '4H':  30 * 60 * 1000,  // 30 min
+};
+
+// Min EMA spread as % of ATR — prevents entering when EMAs are barely crossed
+const MIN_EMA_SPREAD_ATR_PCT = 0.15; // EMA9-EMA21 must be >= 15% of ATR apart
+
 const TV_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Origin': 'https://www.tradingview.com',
@@ -76,7 +89,7 @@ function ns() {
     entry: 0, sl: 0, originalSl: 0, tp1: 0, tp2: 0, tp3: 0, atr: 0, dir: 'long',
     tp1Hit: false, tp2Hit: false, tp3Hit: false,
     slMovedToBE: false, slMovedToTP1: false,
-    slHit: false, allDone: false, cycle: 0, lastSignal: null,
+    slHit: false, allDone: false, allDoneTime: null as string | null, cycle: 0, lastSignal: null,
     prevEma9: null as number | null, prevEma21: null as number | null,
     lastFlipTime: null as string | null,
     aiConfirmed: false, aiReason: 'no_ai_data',
@@ -119,7 +132,7 @@ function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
   }
   if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) { s.tp3Hit = true; if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 3, sent: false }); }
   if (s.tp1Hit && s.tp2Hit && s.tp3Hit) {
-    if (!prev.allDone) { s.allDone = true; al.push({ type: 'alldone', timeframe: l, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, sent: false }); }
+    if (!prev.allDone) { s.allDone = true; s.allDoneTime = new Date().toISOString(); al.push({ type: 'alldone', timeframe: l, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, sent: false }); }
   }
 }
 
@@ -569,36 +582,51 @@ Deno.serve(async (req) => {
         });
       }
     }
-    // ── All TPs hit: immediately start new trade on current EMA direction ──
+    // ── All TPs hit: start new trade after cooldown + EMA spread check ──
     else if (justFinishedAllTPs && s.prevEma9 != null && s.prevEma21 != null) {
-      const signal = ema9 > ema21 ? 'buy' : 'sell';
-      s.dir = signal === 'buy' ? 'long' : 'short';
-      s.cycle++;
-      s.entry = tfPrice || livePrice || 0;
-      s.atr = atr;
-      s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-      s.slMovedToBE = false; s.slMovedToTP1 = false;
-      s.slHit = s.allDone = false;
-      s.lastSignal = signal;
-      s.lastFlipTime = new Date().toISOString();
-      setLevels(s, atr);
-      s.entryTime = new Date().toISOString();
+      // Check cooldown since allDone was set
+      const alltpCooldown = ALLTP_COOLDOWN_MS[l] || 0;
+      const allDoneTime = s.allDoneTime ? new Date(s.allDoneTime).getTime() : Date.now();
+      const sinceAllTP = Date.now() - allDoneTime;
+      const inAllTPCooldown = alltpCooldown > 0 && sinceAllTP < alltpCooldown;
 
-      const ai = aiAnalysis[l];
-      const aiCheck = aiConfirms(ai, s.dir);
-      s.aiConfirmed = aiCheck.confirmed;
-      s.aiReason = aiCheck.reason;
+      // Check EMA spread strength — avoid choppy entries when EMAs are barely crossed
+      const emaSpread = Math.abs(ema9 - ema21);
+      const minSpread = atr * MIN_EMA_SPREAD_ATR_PCT;
+      const spreadOK = emaSpread >= minSpread;
 
-      const exists = await alertExists(l, s.cycle, 'entry');
-      if (!exists) {
-        alerts.push({
-          type: 'entry', timeframe: l, direction: signal,
-          entry: s.entry, sl: s.sl,
-          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
-          cycle: s.cycle, price: tfPrice, sent: false,
-        });
+      if (!inAllTPCooldown && spreadOK) {
+        const signal = ema9 > ema21 ? 'buy' : 'sell';
+        s.dir = signal === 'buy' ? 'long' : 'short';
+        s.cycle++;
+        s.entry = tfPrice || livePrice || 0;
+        s.atr = atr;
+        s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
+        s.slMovedToBE = false; s.slMovedToTP1 = false;
+        s.slHit = s.allDone = false;
+        s.lastSignal = signal;
+        s.lastFlipTime = new Date().toISOString();
+        setLevels(s, atr);
+        s.entryTime = new Date().toISOString();
+
+        const ai = aiAnalysis[l];
+        const aiCheck = aiConfirms(ai, s.dir);
+        s.aiConfirmed = aiCheck.confirmed;
+        s.aiReason = aiCheck.reason;
+
+        const exists = await alertExists(l, s.cycle, 'entry');
+        if (!exists) {
+          alerts.push({
+            type: 'entry', timeframe: l, direction: signal,
+            entry: s.entry, sl: s.sl,
+            tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
+            cycle: s.cycle, price: tfPrice, sent: false,
+          });
+        }
+        console.log(`[${l}] All TPs hit — new cycle ${s.cycle} (${signal}) at $${s.entry} after ${Math.round(sinceAllTP/1000)}s cooldown`);
+      } else {
+        console.log(`[${l}] All TPs hit — waiting: cooldown=${inAllTPCooldown} spread=${emaSpread.toFixed(2)} minReq=${minSpread.toFixed(2)}`);
       }
-      console.log(`[${l}] All TPs hit — new cycle ${s.cycle} started (${signal}) at $${s.entry}`);
     }
     // ── SL hit: wait for fresh EMA crossover before new trade ──
     else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
@@ -610,7 +638,12 @@ Deno.serve(async (req) => {
       const sinceLast = Date.now() - lastFlip;
       const inCooldown = cooldownMs > 0 && sinceLast < cooldownMs;
 
-      if ((crossUp || crossDn) && !inCooldown) {
+      // Also check EMA spread for SL-hit crossover entries
+      const emaSpreadSL = Math.abs(ema9 - ema21);
+      const minSpreadSL = atr * MIN_EMA_SPREAD_ATR_PCT;
+      const spreadOKSL = emaSpreadSL >= minSpreadSL;
+
+      if ((crossUp || crossDn) && !inCooldown && spreadOKSL) {
         s.lastFlipTime = new Date().toISOString();
         s.dir = crossUp ? 'long' : 'short';
         s.cycle++;
