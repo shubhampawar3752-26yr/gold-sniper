@@ -135,6 +135,7 @@ function ns() {
     entryTime: null as string | null,
     pendingEntry: 0, pendingDir: 'long', pendingTime: null as string | null,
     pendingAtr: 0, pendingCycle: 0,
+    smartEntry: false,
   };
 }
 
@@ -354,6 +355,7 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
       exit_level: exitLevel,
       sl_at_exit: s.sl,
       points: points,
+      smart_entry: s.smartEntry || false,
     });
 
     // Update cumulative trade_stats via atomic RPC function
@@ -673,6 +675,7 @@ Deno.serve(async (req) => {
             cycle: s.cycle, price: tfPrice, sent: false, smart_entry: true,
           });
         }
+        s.smartEntry = true;
         console.log(`[${l}] Smart entry FILLED: cycle ${s.cycle} (${s.lastSignal}) at $${s.entry} (limit order)`);
         // Clear pending
         s.pendingEntry = 0; s.pendingDir = 'long'; s.pendingTime = null; s.pendingAtr = 0; s.pendingCycle = 0;
