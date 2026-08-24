@@ -132,9 +132,8 @@ function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
   }
   if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) {
     s.tp3Hit = true;
-    s.sl = s.tp2; // Move SL to TP2 price (lock in TP2 profit)
-    s.slMovedToTP2 = true;
-    if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, sl_moved: 'tp2', cycle: s.cycle, price: px, progress: 3, sent: false });
+    // TP3 hit = target achieved — no SL move needed, trade closes at TP3
+    if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 3, sent: false });
   }
   if (s.tp1Hit && s.tp2Hit && s.tp3Hit) {
     if (!prev.allDone) { s.allDone = true; s.allDoneTime = new Date().toISOString(); al.push({ type: 'alldone', timeframe: l, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, sent: false }); }
@@ -509,16 +508,8 @@ Deno.serve(async (req) => {
     
     // Re-apply trailing SL if lost (TP1 hit but SL not at breakeven)
     if (!s.slHit && !s.allDone && s.tp1Hit && s.entry > 0) {
-      // TP3 hit → SL should be at TP2 (highest priority)
-      if (s.tp3Hit && s.tp2 > 0 && s.sl !== s.tp2) {
-        s.sl = s.tp2;
-        s.slMovedToTP2 = true;
-        s.slMovedToTP1 = true;
-        s.slMovedToBE = true;
-        console.log(`[${tf.l}] Fixup: SL moved to TP2 ($${s.sl})`);
-      }
       // TP2 hit → SL should be at TP1
-      else if (s.tp2Hit && s.tp1 > 0 && s.sl !== s.tp1) {
+      if (s.tp2Hit && s.tp1 > 0 && s.sl !== s.tp1) {
         s.sl = s.tp1;
         s.slMovedToTP1 = true;
         s.slMovedToBE = true;
