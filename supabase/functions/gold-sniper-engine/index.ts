@@ -88,7 +88,7 @@ function ns() {
   return {
     entry: 0, sl: 0, originalSl: 0, tp1: 0, tp2: 0, tp3: 0, atr: 0, dir: 'long',
     tp1Hit: false, tp2Hit: false, tp3Hit: false,
-    slMovedToBE: false, slMovedToTP1: false,
+    slMovedToBE: false, slMovedToTP1: false, slMovedToTP2: false,
     slHit: false, allDone: false, allDoneTime: null as string | null, cycle: 0, lastSignal: null,
     prevEma9: null as number | null, prevEma21: null as number | null,
     lastFlipTime: null as string | null,
@@ -121,16 +121,21 @@ function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
     s.tp1Hit = true;
     s.sl = s.entry; // Move SL to entry price (breakeven)
     s.slMovedToBE = true;
-    if (!prev.tp1) al.push({ type: 'tp', timeframe: l, tp_num: 1, tp_price: s.tp1, entry: s.entry, direction: dir, sl: s.sl, slMoved: 'breakeven', cycle: s.cycle, price: px, progress: 1, sent: false });
+    if (!prev.tp1) al.push({ type: 'tp', timeframe: l, tp_num: 1, tp_price: s.tp1, entry: s.entry, direction: dir, sl: s.sl, sl_moved: 'breakeven', cycle: s.cycle, price: px, progress: 1, sent: false });
   }
   // TP2 hit → move SL to TP1 price
   if (s.tp1Hit && !s.tp2Hit && hit(px, s.tp2, s.dir)) {
     s.tp2Hit = true;
     s.sl = s.tp1; // Move SL to TP1 price (lock in TP1 profit)
     s.slMovedToTP1 = true;
-    if (!prev.tp2) al.push({ type: 'tp', timeframe: l, tp_num: 2, tp_price: s.tp2, entry: s.entry, direction: dir, sl: s.sl, slMoved: 'tp1', cycle: s.cycle, price: px, progress: 2, sent: false });
+    if (!prev.tp2) al.push({ type: 'tp', timeframe: l, tp_num: 2, tp_price: s.tp2, entry: s.entry, direction: dir, sl: s.sl, sl_moved: 'tp1', cycle: s.cycle, price: px, progress: 2, sent: false });
   }
-  if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) { s.tp3Hit = true; if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 3, sent: false }); }
+  if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) {
+    s.tp3Hit = true;
+    s.sl = s.tp2; // Move SL to TP2 price (lock in TP2 profit)
+    s.slMovedToTP2 = true;
+    if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, sl_moved: 'tp2', cycle: s.cycle, price: px, progress: 3, sent: false });
+  }
   if (s.tp1Hit && s.tp2Hit && s.tp3Hit) {
     if (!prev.allDone) { s.allDone = true; s.allDoneTime = new Date().toISOString(); al.push({ type: 'alldone', timeframe: l, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, sent: false }); }
   }
@@ -291,6 +296,23 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
       pnl_pips: pnlPips,
       pnl_percent: pnlPercent,
     });
+
+    // Update cumulative trade_stats via atomic RPC function
+    const isWin = pnlPips > 0;
+    const isLoss = pnlPips < 0;
+    const isBE = pnlPips === 0;
+    const isAllTPs = tpsHit === 3;
+    try {
+      await fetch(`${SUPA_URL}/rest/v1/rpc/update_trade_stats`, {
+        method: 'POST',
+        headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tf: l, pnl_pips: pnlPips, pnl_pct: pnlPercent,
+          is_win: isWin, is_loss: isLoss, is_be: isBE, is_alltp: isAllTPs,
+        }),
+      });
+      console.log(`[${l}] Stats updated: pnl=${pnlPips}pts win=${isWin} allTPs=${isAllTPs}`);
+    } catch (e) { console.error(`trade_stats update failed: ${(e as Error).message}`); }
   } catch (e) { console.error(`trade_history insert failed: ${(e as Error).message}`); }
 }
 
@@ -381,9 +403,9 @@ _Gold Sniper Engine_`;
   }
 
   if (alert.type === 'tp') {
-    const slNote = alert.slMoved === 'breakeven'
+    const slNote = alert.sl_moved === 'breakeven'
       ? '\n*🛡️ SL moved to Entry (Breakeven)*'
-      : alert.slMoved === 'tp1'
+      : alert.sl_moved === 'tp1'
       ? `\n*🛡️ SL moved to TP1 ($${alert.sl?.toFixed(2) || '?'})*`
       : '';
     return `${icon} *GOLD SNIPER — TP${alert.tp_num} HIT (${tf})*
@@ -416,7 +438,7 @@ _Gold Sniper Engine_`;
 *Current Price:* $${alert.price?.toFixed(2)}
 
 *All 3 TP targets reached!*
-_Cycle ${alert.cycle} — Perfect trade_
+_Cycle ${alert.cycle} — 🎯 TARGET ACHIEVED — All 3 TPs hit!_
 _Gold Sniper Engine_`;
   }
 
@@ -487,17 +509,27 @@ Deno.serve(async (req) => {
     
     // Re-apply trailing SL if lost (TP1 hit but SL not at breakeven)
     if (!s.slHit && !s.allDone && s.tp1Hit && s.entry > 0) {
-      if (!s.slMovedToBE || s.sl !== s.entry) {
-        s.originalSl = s.originalSl || s.sl; // Save original SL if not saved
-        s.sl = s.entry; // Move SL to entry (breakeven)
+      // TP3 hit → SL should be at TP2 (highest priority)
+      if (s.tp3Hit && s.tp2 > 0 && s.sl !== s.tp2) {
+        s.sl = s.tp2;
+        s.slMovedToTP2 = true;
+        s.slMovedToTP1 = true;
         s.slMovedToBE = true;
-        console.log(`[${tf.l}] Fixup: SL moved to breakeven ($${s.sl})`);
+        console.log(`[${tf.l}] Fixup: SL moved to TP2 ($${s.sl})`);
       }
       // TP2 hit → SL should be at TP1
-      if (s.tp2Hit && s.tp1 > 0 && s.sl !== s.tp1) {
+      else if (s.tp2Hit && s.tp1 > 0 && s.sl !== s.tp1) {
         s.sl = s.tp1;
         s.slMovedToTP1 = true;
+        s.slMovedToBE = true;
         console.log(`[${tf.l}] Fixup: SL moved to TP1 ($${s.sl})`);
+      }
+      // TP1 hit → SL should be at entry (breakeven)
+      else if (!s.slMovedToBE || s.sl !== s.entry) {
+        s.originalSl = s.originalSl || s.sl;
+        s.sl = s.entry;
+        s.slMovedToBE = true;
+        console.log(`[${tf.l}] Fixup: SL moved to breakeven ($${s.sl})`);
       }
     }
   }
@@ -578,7 +610,7 @@ Deno.serve(async (req) => {
       s.atr = atr;
       s.lastSignal = signal;
       s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-      s.slMovedToBE = false; s.slMovedToTP1 = false;
+      s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
       s.slHit = s.allDone = false;
       setLevels(s, atr);
       s.entryTime = new Date().toISOString();
@@ -618,7 +650,7 @@ Deno.serve(async (req) => {
         s.entry = tfPrice || livePrice || 0;
         s.atr = atr;
         s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-        s.slMovedToBE = false; s.slMovedToTP1 = false;
+        s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
         s.slHit = s.allDone = false;
         s.lastSignal = signal;
         s.lastFlipTime = new Date().toISOString();
@@ -676,7 +708,7 @@ Deno.serve(async (req) => {
         s.entry = tfPrice || livePrice || 0;
         s.atr = atr;
         s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-        s.slMovedToBE = false; s.slMovedToTP1 = false;
+        s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
         s.slHit = s.allDone = false;
         s.lastSignal = currentLong ? 'buy' : 'sell';
         setLevels(s, atr);
