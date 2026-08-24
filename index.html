@@ -8,7 +8,33 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
-  --bg: #0a0a0f; --card: #1a1a25; --border: #333;
+  --bg: #0a0a0f;
+[data-theme="light"] {
+  --bg: #f5f5f0; --card: #ffffff; --border: #ddd;
+  --gold: #B8860B; --gold-orange: #D2691E;
+  --green: #008000; --red: #CC0000; --yellow: #B8860B;
+  --text: #1a1a1a; --muted: #999;
+}
+[data-theme="light"] .header { background: linear-gradient(135deg, #eee, #fff); }
+[data-theme="light"] .signal-engine { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .price-card { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .tf-card { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.1); }
+[data-theme="light"] .trade-card { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .history-panel { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .stat-tile { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .tf-label { color: #1a1a1a; }
+[data-theme="light"] .logo-text::after { display: none; }
+[data-theme="light"] .replay-panel { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .streak-panel { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .replay-detail .replay-stat { background: rgba(0,0,0,0.03) !important; }
+[data-theme="light"] .streak-card { background: rgba(0,0,0,0.03) !important; }
+
+.theme-toggle { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); cursor: pointer; font-size: 14px; transition: all 0.3s; flex-shrink: 0; }
+.theme-toggle:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(255,215,0,0.15); }
+.theme-toggle svg { width: 16px; height: 16px; }
+.header-right { display: flex; align-items: center; gap: 10px; }
+
+ --card: #1a1a25; --border: #333;
   --gold: #FFD700; --gold-orange: #FFA500;
   --green: #00e676; --red: #ff4444; --yellow: #ffcc00;
   --text: #e0e0e0; --muted: #666;
@@ -145,6 +171,42 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 .no-trades-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.3; }
 .no-trades-text { font-size: 15px; color: var(--muted); }
 
+
+/* Streak Tracker */
+.streak-panel { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+.streak-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 16px; }
+.streak-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px; text-align: center; transition: all 0.3s; }
+.streak-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); }
+.streak-card.win-streak { border-color: rgba(0,255,100,0.3); box-shadow: 0 0 12px rgba(0,255,100,0.08); }
+.streak-card.loss-streak { border-color: rgba(255,68,68,0.3); box-shadow: 0 0 12px rgba(255,68,68,0.08); }
+.streak-tf { font-size: 16px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+.streak-current { font-size: 22px; font-weight: 800; margin: 4px 0; }
+.streak-current.win { color: var(--green); }
+.streak-current.loss { color: var(--red); }
+.streak-current.be { color: var(--yellow); }
+.streak-detail { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+
+/* Trade Replay */
+.replay-panel { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+.replay-controls { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+.replay-slider { flex: 1; height: 6px; -webkit-appearance: none; appearance: none; background: rgba(255,255,255,0.08); border-radius: 3px; outline: none; }
+.replay-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--gold); cursor: pointer; box-shadow: 0 0 8px rgba(255,215,0,0.3); }
+.replay-slider::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--gold); cursor: pointer; border: none; }
+.replay-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+.replay-btn:hover { border-color: var(--gold); box-shadow: 0 0 8px rgba(255,215,0,0.1); }
+.replay-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.replay-counter { font-size: 13px; color: var(--muted); font-weight: 600; min-width: 70px; text-align: center; }
+.replay-detail { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin-top: 16px; }
+.replay-stat { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px; text-align: center; }
+.replay-stat .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 4px; }
+.replay-stat .val { font-size: 14px; font-weight: 700; }
+.replay-stat .val.green { color: var(--green); }
+.replay-stat .val.red { color: var(--red); }
+.replay-stat .val.gold { color: var(--gold); }
+.replay-bar { height: 4px; border-radius: 2px; margin-top: 12px; background: rgba(255,255,255,0.05); overflow: hidden; }
+.replay-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s; }
+
 /* Trade History */
 .history-panel { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
 .history-list { max-height: 400px; overflow-y: auto; }
@@ -195,7 +257,7 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
     </div>
     <span class="logo-text">GOLD SNIPER</span>
   </div>
-  <div class="feed-badge" id="feedBadge"><span class="feed-dot" id="feedDot"></span><span id="feedText">FEED</span></div>
+  <div class="header-right"><button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme"><svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button><div class="feed-badge" id="feedBadge"><span class="feed-dot" id="feedDot"></span><span id="feedText">FEED</span></div></div>
 </div>
 
 <div class="container">
@@ -221,6 +283,13 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
     <div class="stat-tile gold"><div class="num" id="statComplete">0</div><div class="lbl">Cycles Done</div></div>
   </div>
 
+
+  <!-- Streak Tracker -->
+  <div class="streak-panel">
+    <div class="section-title"><h2>Win/Loss Streaks</h2><span class="trade-count" id="streakStatus" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.1);color:#aaa">Loading...</span></div>
+    <div class="streak-grid" id="streakGrid"><div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;grid-column:1/-1">Calculating streaks...</div></div>
+  </div>
+
   <!-- Signal Engine -->
   <div class="signal-engine">
     <div class="signal-header">
@@ -244,6 +313,22 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
     </div>
   </div>
 </div>
+
+  <!-- Trade Replay -->
+  <div class="replay-panel">
+    <div class="section-title"><h2>Trade Replay</h2><button class="replay-btn" id="replayLoadBtn" onclick="loadReplay()">Load Trades</button></div>
+    <div id="replayContent" style="display:none">
+      <div class="replay-controls">
+        <button class="replay-btn" onclick="replayNav(-1)" id="replayPrev">Prev</button>
+        <input type="range" class="replay-slider" id="replaySlider" min="0" max="0" value="0" oninput="replayGo(this.value)">
+        <button class="replay-btn" onclick="replayNav(1)" id="replayNext">Next</button>
+        <span class="replay-counter" id="replayCounter">0 / 0</span>
+      </div>
+      <div id="replayDetail"></div>
+    </div>
+    <div id="replayPlaceholder" style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Click "Load Trades" to scrub through past trade history</div>
+  </div>
+
 
 
 <script>
@@ -387,6 +472,179 @@ async function fetchD() {
     document.getElementById('errorBanner').textContent = '⚠ ' + err.message + ' — Retrying…';
     document.getElementById('errorBanner').style.display = 'block';
   }
+}
+
+
+// -- Theme Toggle --
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('gs-theme', next);
+  const icon = document.getElementById('themeIcon');
+  if (next === 'light') {
+    icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  } else {
+    icon.innerHTML = '<circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>';
+  }
+}
+(function() {
+  const saved = localStorage.getItem('gs-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  if (saved === 'light') {
+    document.getElementById('themeIcon').innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  }
+})();
+
+// -- Streak Tracker + Trade Replay --
+const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNjaGVncGt3ZndrZ2ZtbXBuemljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4NjAzMTQsImV4cCI6MjEwMjQzNjMxNH0.nC4NmdgTt4HL9Q7v0qM1QzmkRniJx9HwZRbfX460W74';
+const SUPA_REST = 'https://schegpkwfwkgfmmpnzic.supabase.co/rest/v1';
+
+async function fetchTradeHistory(limit) {
+  limit = limit || 100;
+  const url = SUPA_REST + '/trade_history?order=id.desc&limit=' + limit;
+  const res = await fetch(url, { headers: { 'apikey': ANON_KEY, 'Authorization': 'Bearer ' + ANON_KEY } });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function loadStreaks() {
+  try {
+    const trades = await fetchTradeHistory(200);
+    if (!trades || trades.length === 0) {
+      document.getElementById('streakGrid').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;grid-column:1/-1">No trade history yet</div>';
+      document.getElementById('streakStatus').textContent = 'No data';
+      return;
+    }
+    const byTf = {};
+    trades.forEach(function(t) {
+      const tf = t.timeframe || '?';
+      if (!byTf[tf]) byTf[tf] = [];
+      byTf[tf].push(t);
+    });
+    let html = '';
+    const tfOrder = ['1M','5M','15M','30M','1H','4H'];
+    const tfs = Object.keys(byTf).sort(function(a,b) { return tfOrder.indexOf(a) - tfOrder.indexOf(b); });
+    for (const tf of tfs) {
+      const tfTrades = byTf[tf].reverse();
+      let curStreak = 0, curType = 'be';
+      const last = tfTrades[tfTrades.length - 1];
+      if (last) {
+        const pnl = last.pnl_pips || 0;
+        if (pnl > 0) curType = 'win'; else if (pnl < 0) curType = 'loss'; else curType = 'be';
+      }
+      for (let i = tfTrades.length - 1; i >= 0; i--) {
+        const p = tfTrades[i].pnl_pips || 0;
+        const t = p > 0 ? 'win' : p < 0 ? 'loss' : 'be';
+        if (t === curType) curStreak++; else break;
+      }
+      let maxWin = 0, maxLoss = 0, curWin = 0, curLoss = 0;
+      tfTrades.forEach(function(t) {
+        const p = t.pnl_pips || 0;
+        if (p > 0) { curWin++; curLoss = 0; if (curWin > maxWin) maxWin = curWin; }
+        else if (p < 0) { curLoss++; curWin = 0; if (curLoss > maxLoss) maxLoss = curLoss; }
+        else { curWin = 0; curLoss = 0; }
+      });
+      const total = tfTrades.length;
+      const cls = curType === 'win' ? 'win-streak' : curType === 'loss' ? 'loss-streak' : '';
+      const label = curType === 'win' ? 'W' + curStreak : curType === 'loss' ? 'L' + curStreak : 'BE';
+      const colorCls = curType === 'win' ? 'win' : curType === 'loss' ? 'loss' : 'be';
+      html += '<div class="streak-card ' + cls + '"><div class="streak-tf">' + tf + '</div><div class="streak-current ' + colorCls + '">' + label + '</div><div class="streak-detail">' + total + ' trades &middot; Best W' + maxWin + ' / Worst L' + maxLoss + '</div></div>';
+    }
+    document.getElementById('streakGrid').innerHTML = html;
+    document.getElementById('streakStatus').textContent = tfs.length + ' timeframes';
+  } catch (e) {
+    document.getElementById('streakGrid').innerHTML = '<div style="text-align:center;padding:20px;color:var(--red);font-size:13px;grid-column:1/-1">Error: ' + e.message + '</div>';
+    document.getElementById('streakStatus').textContent = 'Error';
+  }
+}
+loadStreaks();
+setInterval(loadStreaks, 60000);
+
+// -- Trade Replay --
+let replayTrades = [];
+let replayIdx = 0;
+
+async function loadReplay() {
+  try {
+    document.getElementById('replayLoadBtn').textContent = 'Loading...';
+    replayTrades = await fetchTradeHistory(50);
+    if (!replayTrades || replayTrades.length === 0) {
+      document.getElementById('replayPlaceholder').innerHTML = '<div style="color:var(--muted)">No trades to replay</div>';
+      document.getElementById('replayLoadBtn').textContent = 'Load Trades';
+      return;
+    }
+    document.getElementById('replayPlaceholder').style.display = 'none';
+    document.getElementById('replayContent').style.display = 'block';
+    const slider = document.getElementById('replaySlider');
+    slider.max = replayTrades.length - 1;
+    slider.value = 0;
+    replayIdx = 0;
+    replayRender();
+    document.getElementById('replayLoadBtn').textContent = 'Reload';
+  } catch (e) {
+    document.getElementById('replayPlaceholder').innerHTML = '<div style="color:var(--red)">Error: ' + e.message + '</div>';
+    document.getElementById('replayLoadBtn').textContent = 'Load Trades';
+  }
+}
+
+function replayGo(idx) { replayIdx = parseInt(idx); replayRender(); }
+function replayNav(dir) {
+  replayIdx = Math.max(0, Math.min(replayTrades.length - 1, replayIdx + dir));
+  document.getElementById('replaySlider').value = replayIdx;
+  replayRender();
+}
+
+function replayRender() {
+  const t = replayTrades[replayIdx];
+  if (!t) return;
+  document.getElementById('replayCounter').textContent = (replayIdx + 1) + ' / ' + replayTrades.length;
+  document.getElementById('replayPrev').disabled = replayIdx === 0;
+  document.getElementById('replayNext').disabled = replayIdx === replayTrades.length - 1;
+  const dir = t.direction || 'long';
+  const dirLabel = dir === 'long' ? 'LONG' : 'SHORT';
+  const dirCls = dir === 'long' ? 'green' : 'red';
+  const pnl = t.pnl_pips || 0;
+  const pnlCls = pnl >= 0 ? 'green' : 'red';
+  const pnlPct = t.pnl_percent || 0;
+  const exitReason = (t.exit_reason || '').replace(/_/g, ' ');
+  const exitLevel = t.exit_level || '-';
+  const tpsHit = t.tps_hit || 0;
+  const dur = t.duration_minutes || 0;
+  const entry = t.entry_price || 0;
+  const exit = t.exit_price || 0;
+  const sl = t.sl_price || 0;
+  const tp1 = t.tp1_price || 0;
+  const tp2 = t.tp2_price || 0;
+  const tp3 = t.tp3_price || 0;
+  const smartEntry = t.smart_entry ? 'Yes' : 'No';
+  const tradeDate = t.entry_time ? new Date(t.entry_time).toLocaleString('en-IN', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '-';
+  let tpDots = '';
+  for (let i = 1; i <= 3; i++) {
+    const hit = i <= tpsHit;
+    const price = i === 1 ? tp1 : i === 2 ? tp2 : tp3;
+    tpDots += '<div class="replay-stat"><div class="lbl">TP' + i + (hit ? ' OK' : '') + '</div><div class="val ' + (hit ? 'green' : '') + '" style="' + (!hit ? 'color:var(--muted)' : '') + '">' + (price > 0 ? price.toFixed(2) : '-') + '</div></div>';
+  }
+  const pct = (tpsHit / 3) * 100;
+  const barColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+  let stats = '';
+  stats += '<div class="replay-stat"><div class="lbl">Timeframe</div><div class="val gold">' + (t.timeframe || '-') + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Direction</div><div class="val ' + dirCls + '">' + dirLabel + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Cycle</div><div class="val gold">#' + (t.cycle || '-') + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Smart Entry</div><div class="val" style="color:var(--muted)">' + smartEntry + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Entry Price</div><div class="val gold">$' + entry.toFixed(2) + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Exit Price</div><div class="val ' + pnlCls + '">$' + exit.toFixed(2) + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Stop Loss</div><div class="val red">$' + sl.toFixed(2) + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">ATR</div><div class="val">' + (t.atr || 0).toFixed(2) + '</div></div>';
+  stats += tpDots;
+  stats += '<div class="replay-stat"><div class="lbl">TPs Hit</div><div class="val gold">' + tpsHit + '/3</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">PnL (pips)</div><div class="val ' + pnlCls + '">' + (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">PnL %</div><div class="val ' + pnlCls + '">' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Exit Reason</div><div class="val" style="font-size:11px;color:var(--muted)">' + exitReason + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Exit Level</div><div class="val" style="font-size:11px;color:var(--muted)">' + exitLevel + '</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Duration</div><div class="val">' + dur + 'm</div></div>';
+  stats += '<div class="replay-stat"><div class="lbl">Entry Time</div><div class="val" style="font-size:10px;color:var(--muted)">' + tradeDate + '</div></div>';
+  document.getElementById('replayDetail').innerHTML = '<div class="replay-detail">' + stats + '</div><div class="replay-bar"><div class="replay-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
 }
 
 fetchD();
