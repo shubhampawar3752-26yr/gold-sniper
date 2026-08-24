@@ -39,6 +39,45 @@ const FLIP_COOLDOWN_MS: Record<string, number> = {
   '4H':  60 * 60 * 1000,
 };
 
+// ── Session-based trading: only take new entries during active sessions ──
+// Times in IST (Asia/Kolkata, UTC+5:30)
+// London session: 12:30 - 21:00 IST
+// New York session: 17:00 - 01:30 IST (next day)
+// Overlap (best liquidity): 17:00 - 21:00 IST
+// Asian session: 05:30 - 12:30 IST — SKIP for lower timeframes (choppy)
+const SESSIONS = {
+  london:   { startH: 12, startM: 30, endH: 21, endM: 0 },
+  newyork:  { startH: 17, startM: 0,  endH: 25, endM: 30 }, // 25:30 = 01:30 next day
+};
+
+// Timeframes that require session filtering (lower TFs are choppy in Asian session)
+const SESSION_FILTERED_TFS = ['1M', '5M'];
+
+function isSessionActive(tf: string, date: Date): boolean {
+  if (!SESSION_FILTERED_TFS.includes(tf)) return true; // Higher TFs trade all sessions
+
+  // Convert to IST (UTC+5:30)
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(date.getTime() + istOffset - date.getTimezoneOffset() * 60000);
+  // Get IST hours as decimal (0-24)
+  const istHours = ist.getUTCHours() + ist.getUTCMinutes() / 60;
+
+  const inLondon = istHours >= 12.5 && istHours < 21.0;
+  const inNY = istHours >= 17.0 || istHours < 1.5; // NY extends past midnight
+  return inLondon || inNY;
+}
+
+// ── Smart entry: limit order at slight pullback instead of market price ──
+const SMART_ENTRY_PULLBACK_ATR = 0.3; // Enter at 0.3x ATR pullback from current price
+const SMART_ENTRY_TIMEOUT_MS: Record<string, number> = {
+  '1M':  3 * 60 * 1000,   // 3 min to fill
+  '5M':  5 * 60 * 1000,   // 5 min
+  '15M': 10 * 60 * 1000,  // 10 min
+  '30M': 15 * 60 * 1000,  // 15 min
+  '1H':  30 * 60 * 1000,  // 30 min
+  '4H':  60 * 60 * 1000,  // 60 min
+};
+
 // Cooldown after all TPs hit before starting next trade (prevents choppy entries)
 const ALLTP_COOLDOWN_MS: Record<string, number> = {
   '1M':  2 * 60 * 1000,   // 2 min
@@ -94,6 +133,8 @@ function ns() {
     lastFlipTime: null as string | null,
     aiConfirmed: false, aiReason: 'no_ai_data',
     entryTime: null as string | null,
+    pendingEntry: 0, pendingDir: 'long', pendingTime: null as string | null,
+    pendingAtr: 0, pendingCycle: 0,
   };
 }
 
@@ -593,8 +634,68 @@ Deno.serve(async (req) => {
 
     const done = s.slHit || s.allDone || s.entry === 0;
 
+    // ── Smart entry: check if pending limit order should fill ──
+    if (s.pendingEntry > 0 && !done) {
+      const pendingAge = s.pendingTime ? Date.now() - new Date(s.pendingTime).getTime() : 0;
+      const timeout = SMART_ENTRY_TIMEOUT_MS[l] || 300000;
+
+      // Check if price reached the limit level
+      const fillLong = s.pendingDir === 'long' && tfPrice <= s.pendingEntry;
+      const fillShort = s.pendingDir === 'short' && tfPrice >= s.pendingEntry;
+
+      // Check if EMA crossover has reversed (cancel pending)
+      const emaReversed = (s.pendingDir === 'long' && ema9 < ema21) || (s.pendingDir === 'short' && ema9 > ema21);
+
+      if (fillLong || fillShort) {
+        // Fill the pending entry at limit price
+        s.entry = s.pendingEntry;
+        s.dir = s.pendingDir;
+        s.atr = s.pendingAtr;
+        s.cycle = s.pendingCycle;
+        s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
+        s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
+        s.slHit = s.allDone = false;
+        s.lastSignal = s.pendingDir === 'long' ? 'buy' : 'sell';
+        setLevels(s, s.pendingAtr);
+        s.entryTime = new Date().toISOString();
+
+        const ai = aiAnalysis[l];
+        const aiCheck = aiConfirms(ai, s.dir);
+        s.aiConfirmed = aiCheck.confirmed;
+        s.aiReason = aiCheck.reason;
+
+        const exists = await alertExists(l, s.cycle, 'entry');
+        if (!exists) {
+          alerts.push({
+            type: 'entry', timeframe: l, direction: s.lastSignal,
+            entry: s.entry, sl: s.sl,
+            tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr: s.atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
+            cycle: s.cycle, price: tfPrice, sent: false, smart_entry: true,
+          });
+        }
+        console.log(`[${l}] Smart entry FILLED: cycle ${s.cycle} (${s.lastSignal}) at $${s.entry} (limit order)`);
+        // Clear pending
+        s.pendingEntry = 0; s.pendingDir = 'long'; s.pendingTime = null; s.pendingAtr = 0; s.pendingCycle = 0;
+      } else if (emaReversed || pendingAge > timeout) {
+        // Cancel pending entry — EMA reversed or timed out
+        console.log(`[${l}] Smart entry CANCELLED: ${emaReversed ? 'EMA reversed' : 'timeout'} (age=${Math.round(pendingAge/1000)}s)`);
+        s.pendingEntry = 0; s.pendingDir = 'long'; s.pendingTime = null; s.pendingAtr = 0; s.pendingCycle = 0;
+      }
+      // If still pending, skip new entry logic this run
+      if (s.pendingEntry > 0) {
+        s.prevEma9 = ema9;
+        s.prevEma21 = ema21;
+        if (tfPrice && s.entry > 0) chkTick(tfPrice, s, l, prev[l] || {}, alerts);
+        tfResults.push({ tf: l, ema9, ema21, signal: ema9 > ema21 ? 'buy' : 'sell', atr, rsi, entry: s.entry, sl: s.sl, cycle: s.cycle, dir: s.dir, slHit: s.slHit, allDone: s.allDone, tpHits: [s.tp1Hit, s.tp2Hit, s.tp3Hit], pendingEntry: s.pendingEntry, smartEntry: true });
+        continue;
+      }
+    }
+
+    // Recompute done after smart entry fill
+    const doneNow = s.slHit || s.allDone || s.entry === 0;
+
     // ── Signal flip: close trade when EMA is opposite to trade direction ──
-    if (!done && s.prevEma9 != null && s.prevEma21 != null) {
+    if (!doneNow && s.prevEma9 != null && s.prevEma21 != null) {
       const wasLong = s.prevEma9 > s.prevEma21;
       const nowLong = ema9 > ema21;
       const flippedToShort = wasLong && ema9 < ema21;
@@ -608,36 +709,29 @@ Deno.serve(async (req) => {
       }
     }
 
-    const doneNow = s.slHit || s.allDone || s.entry === 0;
     const justFinishedAllTPs = s.allDone && !s.slHit; // All TPs hit — immediately find new trade
 
     // ── First run (prevEma is null): set up initial trade ──
     if (doneNow && s.prevEma9 == null && s.prevEma21 == null) {
       const signal = ema9 > ema21 ? 'buy' : 'sell';
-      s.dir = signal === 'buy' ? 'long' : 'short';
-      s.cycle = 1;
-      s.entry = tfPrice || livePrice || 0;
-      s.atr = atr;
-      s.lastSignal = signal;
-      s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-      s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
-      s.slHit = s.allDone = false;
-      setLevels(s, atr);
-      s.entryTime = new Date().toISOString();
+      const dir = signal === 'buy' ? 'long' : 'short';
 
-      const ai = aiAnalysis[l];
-      const aiCheck = aiConfirms(ai, s.dir);
-      s.aiConfirmed = aiCheck.confirmed;
-      s.aiReason = aiCheck.reason;
+      // Session filter: skip new entries in Asian session for lower TFs
+      if (!isSessionActive(l, new Date())) {
+        console.log(`[${l}] Skipping entry — outside active session (Asian chop filter)`);
+      } else {
+        // Smart entry: set limit order at pullback instead of market entry
+        const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
+        const limitPrice = dir === 'long' ? (tfPrice || livePrice) - pullback : (tfPrice || livePrice) + pullback;
 
-      const exists = await alertExists(l, s.cycle, 'entry');
-      if (!exists) {
-        alerts.push({
-          type: 'entry', timeframe: l, direction: signal,
-          entry: s.entry, sl: s.sl,
-          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
-          cycle: s.cycle, price: tfPrice, sent: false,
-        });
+        s.pendingEntry = limitPrice;
+        s.pendingDir = dir;
+        s.pendingTime = new Date().toISOString();
+        s.pendingAtr = atr;
+        s.pendingCycle = 1;
+        s.dir = dir;
+        s.lastSignal = signal;
+        console.log(`[${l}] Smart entry PENDING: cycle 1 (${signal}) limit=$${limitPrice.toFixed(2)} (pullback ${pullback.toFixed(2)})`);
       }
     }
     // ── All TPs hit: start new trade after cooldown + EMA spread check ──
@@ -655,33 +749,26 @@ Deno.serve(async (req) => {
 
       if (!inAllTPCooldown && spreadOK) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
-        s.dir = signal === 'buy' ? 'long' : 'short';
-        s.cycle++;
-        s.entry = tfPrice || livePrice || 0;
-        s.atr = atr;
-        s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-        s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
-        s.slHit = s.allDone = false;
-        s.lastSignal = signal;
-        s.lastFlipTime = new Date().toISOString();
-        setLevels(s, atr);
-        s.entryTime = new Date().toISOString();
+        const dir = signal === 'buy' ? 'long' : 'short';
 
-        const ai = aiAnalysis[l];
-        const aiCheck = aiConfirms(ai, s.dir);
-        s.aiConfirmed = aiCheck.confirmed;
-        s.aiReason = aiCheck.reason;
+        // Session filter
+        if (!isSessionActive(l, new Date())) {
+          console.log(`[${l}] All TPs hit — waiting for active session (Asian chop filter)`);
+        } else {
+          // Smart entry: limit at pullback
+          const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
+          const limitPrice = dir === 'long' ? (tfPrice || livePrice) - pullback : (tfPrice || livePrice) + pullback;
 
-        const exists = await alertExists(l, s.cycle, 'entry');
-        if (!exists) {
-          alerts.push({
-            type: 'entry', timeframe: l, direction: signal,
-            entry: s.entry, sl: s.sl,
-            tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
-            cycle: s.cycle, price: tfPrice, sent: false,
-          });
+          s.pendingEntry = limitPrice;
+          s.pendingDir = dir;
+          s.pendingTime = new Date().toISOString();
+          s.pendingAtr = atr;
+          s.pendingCycle = s.cycle + 1;
+          s.dir = dir;
+          s.lastSignal = signal;
+          s.lastFlipTime = new Date().toISOString();
+          console.log(`[${l}] All TPs hit — smart entry PENDING: cycle ${s.pendingCycle} (${signal}) limit=$${limitPrice.toFixed(2)} after ${Math.round(sinceAllTP/1000)}s cooldown`);
         }
-        console.log(`[${l}] All TPs hit — new cycle ${s.cycle} (${signal}) at $${s.entry} after ${Math.round(sinceAllTP/1000)}s cooldown`);
       } else {
         console.log(`[${l}] All TPs hit — waiting: cooldown=${inAllTPCooldown} spread=${emaSpread.toFixed(2)} minReq=${minSpread.toFixed(2)}`);
       }
@@ -712,33 +799,27 @@ Deno.serve(async (req) => {
       const shouldEnter = ((crossUp || crossDn) || alreadyFlipped) && !inCooldown && spreadOKSL;
 
       if (shouldEnter) {
-        s.lastFlipTime = new Date().toISOString();
-        s.dir = currentLong ? 'long' : 'short';
-        s.cycle++;
-        s.entry = tfPrice || livePrice || 0;
-        s.atr = atr;
-        s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
-        s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
-        s.slHit = s.allDone = false;
-        s.lastSignal = currentLong ? 'buy' : 'sell';
-        setLevels(s, atr);
-        s.entryTime = new Date().toISOString();
+        const dir = currentLong ? 'long' : 'short';
+        const signal = currentLong ? 'buy' : 'sell';
 
-        const ai = aiAnalysis[l];
-        const aiCheck = aiConfirms(ai, s.dir);
-        s.aiConfirmed = aiCheck.confirmed;
-        s.aiReason = aiCheck.reason;
+        // Session filter
+        if (!isSessionActive(l, new Date())) {
+          console.log(`[${l}] Crossover detected — skipping entry (outside active session)`);
+        } else {
+          // Smart entry: limit at pullback
+          const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
+          const limitPrice = dir === 'long' ? (tfPrice || livePrice) - pullback : (tfPrice || livePrice) + pullback;
 
-        const exists = await alertExists(l, s.cycle, 'entry');
-        if (!exists) {
-          alerts.push({
-            type: 'entry', timeframe: l, direction: s.lastSignal,
-            entry: s.entry, sl: s.sl,
-            tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
-            cycle: s.cycle, price: tfPrice, sent: false,
-          });
+          s.pendingEntry = limitPrice;
+          s.pendingDir = dir;
+          s.pendingTime = new Date().toISOString();
+          s.pendingAtr = atr;
+          s.pendingCycle = s.cycle + 1;
+          s.dir = dir;
+          s.lastSignal = signal;
+          s.lastFlipTime = new Date().toISOString();
+          console.log(`[${l}] Smart entry PENDING: cycle ${s.pendingCycle} (${signal}) limit=$${limitPrice.toFixed(2)} | trigger=${crossUp||crossDn ? 'crossover' : 'already-flipped'}`);
         }
-        console.log(`[${l}] New cycle ${s.cycle} (${s.lastSignal}) at $${s.entry} | trigger=${crossUp||crossDn ? 'crossover' : 'already-flipped'}`);
       }
     }
 
