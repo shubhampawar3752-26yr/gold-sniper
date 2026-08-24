@@ -538,6 +538,7 @@ Deno.serve(async (req) => {
     }
 
     const doneNow = s.slHit || s.allDone || s.entry === 0;
+    const justFinishedAllTPs = s.allDone && !s.slHit; // All TPs hit — immediately find new trade
 
     // ── First run (prevEma is null): set up initial trade ──
     if (doneNow && s.prevEma9 == null && s.prevEma21 == null) {
@@ -568,7 +569,38 @@ Deno.serve(async (req) => {
         });
       }
     }
-    // ── Subsequent runs: detect crossover ──
+    // ── All TPs hit: immediately start new trade on current EMA direction ──
+    else if (justFinishedAllTPs && s.prevEma9 != null && s.prevEma21 != null) {
+      const signal = ema9 > ema21 ? 'buy' : 'sell';
+      s.dir = signal === 'buy' ? 'long' : 'short';
+      s.cycle++;
+      s.entry = tfPrice || livePrice || 0;
+      s.atr = atr;
+      s.tp1Hit = s.tp2Hit = s.tp3Hit = false;
+      s.slMovedToBE = false; s.slMovedToTP1 = false;
+      s.slHit = s.allDone = false;
+      s.lastSignal = signal;
+      s.lastFlipTime = new Date().toISOString();
+      setLevels(s, atr);
+      s.entryTime = new Date().toISOString();
+
+      const ai = aiAnalysis[l];
+      const aiCheck = aiConfirms(ai, s.dir);
+      s.aiConfirmed = aiCheck.confirmed;
+      s.aiReason = aiCheck.reason;
+
+      const exists = await alertExists(l, s.cycle, 'entry');
+      if (!exists) {
+        alerts.push({
+          type: 'entry', timeframe: l, direction: signal,
+          entry: s.entry, sl: s.sl,
+          tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
+          cycle: s.cycle, price: tfPrice, sent: false,
+        });
+      }
+      console.log(`[${l}] All TPs hit — new cycle ${s.cycle} started (${signal}) at $${s.entry}`);
+    }
+    // ── SL hit: wait for fresh EMA crossover before new trade ──
     else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
       const crossUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21;
       const crossDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21;
