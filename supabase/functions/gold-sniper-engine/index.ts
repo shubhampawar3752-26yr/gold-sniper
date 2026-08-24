@@ -269,6 +269,22 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
     pnlPips = s.dir === 'long' ? s.tp3 - s.entry : s.entry - s.tp3;
   }
   const pnlPercent = s.entry > 0 ? (pnlPips / s.entry) * 100 : 0;
+
+  // Determine exit level: where did the trade close?
+  let exitLevel = 'unknown';
+  if (exitReason === 'all_tps_hit') {
+    exitLevel = 'tp3';
+  } else if (exitReason === 'sl_hit') {
+    if (s.slMovedToTP1) exitLevel = 'tp1';
+    else if (s.slMovedToBE) exitLevel = 'breakeven';
+    else exitLevel = 'original_sl';
+  } else if (exitReason === 'ema_flip') {
+    if (s.slMovedToTP1) exitLevel = 'tp1';
+    else if (s.slMovedToBE) exitLevel = 'breakeven';
+    else exitLevel = 'original_sl';
+  }
+  // Points captured = PnL in price units
+  const points = Math.round(pnlPips * 100) / 100;
   
   try {
     await supaInsert('trade_history', {
@@ -294,6 +310,9 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
       duration_minutes: durationMin,
       pnl_pips: pnlPips,
       pnl_percent: pnlPercent,
+      exit_level: exitLevel,
+      sl_at_exit: s.sl,
+      points: points,
     });
 
     // Update cumulative trade_stats via atomic RPC function
