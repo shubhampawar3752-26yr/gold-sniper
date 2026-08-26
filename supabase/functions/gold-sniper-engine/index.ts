@@ -382,7 +382,91 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
       });
       console.log(`[${l}] Stats updated: pnl=${pnlPips}pts win=${isWin} allTPs=${isAllTPs}`);
     } catch (e) { console.error(`trade_stats update failed: ${(e as Error).message}`); }
+
+    // Update overall trade_summary (all timeframes combined)
+    try {
+      await updateTradeSummary();
+      console.log(`[${l}] Trade summary updated`);
+    } catch (e) { console.error(`trade_summary update failed: ${(e as Error).message}`); }
   } catch (e) { console.error(`trade_history insert failed: ${(e as Error).message}`); }
+}
+
+// ── Update overall trade_summary table (all timeframes combined) ──
+async function updateTradeSummary() {
+  // Get all trades
+  const r = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,pnl_pips,pnl_percent,tp1_hit,tp2_hit,tp3_hit,exit_reason,timeframe`, {
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
+  });
+  if (!r.ok) return;
+  const trades = await r.json();
+  if (!trades.length) return;
+
+  // Get all trade_stats for best/worst TF
+  const sr = await fetch(`${SUPA_URL}/rest/v1/trade_stats?select=timeframe,total_pips&order=timeframe.asc`, {
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
+  });
+  const stats = sr.ok ? await sr.json() : [];
+  const tfPips: Record<string, number> = {};
+  for (const s of stats) tfPips[s.timeframe] = parseFloat(s.total_pips) || 0;
+  const bestTf = stats.length ? stats.reduce((a: any, b: any) => tfPips[a.timeframe] >= tfPips[b.timeframe] ? a : b).timeframe : null;
+  const worstTf = stats.length ? stats.reduce((a: any, b: any) => tfPips[a.timeframe] <= tfPips[b.timeframe] ? a : b).timeframe : null;
+
+  const total = trades.length;
+  const wins = trades.filter((t: any) => t.tp1_hit || parseFloat(t.pnl_pips) > 0).length;
+  const losses = trades.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) < 0).length;
+  const breakeven = trades.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) === 0).length;
+  const totalPips = trades.reduce((s: number, t: any) => s + parseFloat(t.pnl_pips || 0), 0);
+  const totalPnl = trades.reduce((s: number, t: any) => s + parseFloat(t.pnl_percent || 0), 0);
+  const tpHits = trades.filter((t: any) => t.tp1_hit).length;
+  const slHits = losses;
+  const allTpTrades = trades.filter((t: any) => t.exit_reason === 'all_tps_hit').length;
+  const bestTrade = Math.max(...trades.map((t: any) => parseFloat(t.pnl_pips || 0)));
+  const worstTrade = Math.min(...trades.map((t: any) => parseFloat(t.pnl_pips || 0)));
+  const avgTrade = totalPips / total;
+
+  // Upsert: update existing row or insert new
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const existing = await fetch(`${SUPA_URL}/rest/v1/trade_summary?select=id&summary_date=eq.${today}&limit=1`, {
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
+  });
+  const existingData = existing.ok ? await existing.json() : [];
+
+  const summary: any = {
+    summary_date: today,
+    total_trades: total,
+    total_wins: wins,
+    total_losses: losses,
+    total_breakeven: breakeven,
+    total_pips: Math.round(totalPips * 100) / 100,
+    total_pnl: Math.round(totalPnl * 10000) / 10000,
+    best_trade: Math.round(bestTrade * 100) / 100,
+    worst_trade: Math.round(worstTrade * 100) / 100,
+    avg_trade: Math.round(avgTrade * 100) / 100,
+    overall_win_rate: Math.round((wins / total * 100) * 100) / 100,
+    total_tp_hits: tpHits,
+    total_sl_hits: slHits,
+    all_tp_trades: allTpTrades,
+    best_timeframe: bestTf,
+    worst_timeframe: worstTf,
+    total_points: 0,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingData.length > 0) {
+    // Update existing
+    await fetch(`${SUPA_URL}/rest/v1/trade_summary?id=eq.${existingData[0].id}`, {
+      method: 'PATCH',
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(summary),
+    });
+  } else {
+    // Insert new
+    await fetch(`${SUPA_URL}/rest/v1/trade_summary`, {
+      method: 'POST',
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(summary),
+    });
+  }
 }
 
 // ── Idempotency: check if alert already exists for this timeframe/cycle/type ──
