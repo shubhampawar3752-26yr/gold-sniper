@@ -366,9 +366,9 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
     });
 
     // Update cumulative trade_stats via atomic RPC function
-    const isWin = pnlPips > 0;
-    const isLoss = pnlPips < 0;
-    const isBE = pnlPips === 0;
+    const isWin = pnlPips > 0 || (s.tp1Hit && exitReason === 'ema_flip');
+    const isLoss = pnlPips < 0 && !(s.tp1Hit && exitReason === 'ema_flip');
+    const isBE = pnlPips === 0 && !(s.tp1Hit && exitReason === 'ema_flip');
     const isAllTPs = tpsHit === 3;
     try {
       await fetch(`${SUPA_URL}/rest/v1/rpc/update_trade_stats`, {
@@ -895,7 +895,13 @@ Deno.serve(async (req) => {
         const lastAlert = alerts.find(a => a.timeframe === l && a.type === 'sl' && a.cycle === s.cycle);
         if (lastAlert && lastAlert.sl === s.entry) {
           exitReason = 'ema_flip';
-          exitPrice = lastAlert.price || s.entry;
+          // If TP1 was hit, exit at SL price (breakeven or TP1/TP2 level)
+          // This ensures a trade that hit TP1 is NOT counted as a loss
+          if (s.tp1Hit) {
+            exitPrice = s.sl; // SL is at breakeven (or TP1/TP2 if trailing)
+          } else {
+            exitPrice = lastAlert.price || s.entry;
+          }
         } else {
           exitReason = 'sl_hit';
           exitPrice = s.sl;
@@ -921,9 +927,8 @@ Deno.serve(async (req) => {
     const inserted = await supaInsert('alerts', alert);
     if (inserted && Array.isArray(inserted) && inserted.length > 0) {
       const alertId = inserted[0].id;
-      const sent = await sendAlertWhatsApp(alert, alertId);
-      if (sent) alertsSent++;
-      alertDetails.push({ ...alert, status: sent ? 'sent' : 'saved_not_sent', alertId });
+      // WhatsApp alerts disabled — save to database only for dashboard
+      alertDetails.push({ ...alert, status: 'saved', alertId });
     } else {
       alertDetails.push({ ...alert, status: 'insert_failed' });
     }
