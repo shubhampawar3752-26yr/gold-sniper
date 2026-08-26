@@ -31,7 +31,7 @@ const TFS = [
 
 // ── Whipsaw filter: minimum time between signal flips per timeframe ──
 const FLIP_COOLDOWN_MS: Record<string, number> = {
-  '1M':  3 * 60 * 1000,
+  '1M':  5 * 60 * 1000,
   '5M':  5 * 60 * 1000,
   '15M': 10 * 60 * 1000,
   '30M': 15 * 60 * 1000,
@@ -70,7 +70,7 @@ function isSessionActive(tf: string, date: Date): boolean {
 // ── Smart entry: limit order at slight pullback instead of market price ──
 const SMART_ENTRY_PULLBACK_ATR = 0.3; // Enter at 0.3x ATR pullback from current price
 const SMART_ENTRY_TIMEOUT_MS: Record<string, number> = {
-  '1M':  3 * 60 * 1000,   // 3 min to fill
+  '1M':  5 * 60 * 1000,   // 5 min to fill
   '5M':  5 * 60 * 1000,   // 5 min
   '15M': 10 * 60 * 1000,  // 10 min
   '30M': 15 * 60 * 1000,  // 15 min
@@ -90,7 +90,7 @@ const ALLTP_COOLDOWN_MS: Record<string, number> = {
 
 // Min EMA spread as % of ATR — prevents entering when EMAs are barely crossed
 const MIN_EMA_SPREAD_ATR_PCT: Record<string, number> = {
-  '1M':  0.05,  // 5% of ATR — 1M has tight spreads, don't over-filter
+  '1M':  0.12,  // 12% of ATR — tighter to prevent choppy 1M entries
   '5M':  0.08,  // 8% of ATR
   '15M': 0.10,  // 10% of ATR
   '30M': 0.12,  // 12% of ATR
@@ -757,7 +757,8 @@ Deno.serve(async (req) => {
       const minSpread = atr * (MIN_EMA_SPREAD_ATR_PCT[l] || 0.10);
       const spreadOK = emaSpread >= minSpread;
 
-      if (!inAllTPCooldown && spreadOK) {
+      const rsiNeutralAllTP = rsi != null && rsi >= 40 && rsi <= 60;
+      if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
 
@@ -807,7 +808,9 @@ Deno.serve(async (req) => {
 
       // Enter on: fresh crossover OR already-flipped OR EMA has clear direction
       // (After SL hit, if EMA is still signaling a direction, we should re-enter)
-      const shouldEnter = !inCooldown && spreadOKSL;
+      // RSI filter: skip if RSI is in neutral zone (choppy market)
+      const rsiNeutral = rsi != null && rsi >= 40 && rsi <= 60;
+      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
