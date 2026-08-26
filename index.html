@@ -9,36 +9,46 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
   --bg: #0a0a0f;
+  --card: #1a1a25; --border: #333;
+  --gold: #FFD700; --gold-orange: #FFA500;
+  --green: #00e676; --red: #ff4444; --yellow: #ffcc00;
+  --text: #e0e0e0; --muted: #666;
+}
 [data-theme="light"] {
   --bg: #f5f5f0; --card: #ffffff; --border: #ddd;
   --gold: #B8860B; --gold-orange: #D2691E;
   --green: #008000; --red: #CC0000; --yellow: #B8860B;
   --text: #1a1a1a; --muted: #999;
 }
-[data-theme="light"] .header { background: linear-gradient(135deg, #eee, #fff); }
-[data-theme="light"] .signal-engine { background: linear-gradient(135deg, #fff, #f8f8f5); }
-[data-theme="light"] .price-card { background: linear-gradient(135deg, #fff, #f8f8f5); }
-[data-theme="light"] .tf-card { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.1); }
-[data-theme="light"] .trade-card { background: linear-gradient(135deg, #fff, #f8f8f5); }
-[data-theme="light"] .history-panel { background: linear-gradient(135deg, #fff, #f8f8f5); }
-[data-theme="light"] .stat-tile { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .header { background: linear-gradient(135deg, #eee, #fff) !important; }
+[data-theme="light"] .signal-engine { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
+[data-theme="light"] .price-card { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
+[data-theme="light"] .tf-card { background: rgba(0,0,0,0.02) !important; border-color: rgba(0,0,0,0.1) !important; }
+[data-theme="light"] .trade-card { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
+[data-theme="light"] .history-panel { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
+[data-theme="light"] .stat-tile { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
 [data-theme="light"] .tf-label { color: #1a1a1a; }
 [data-theme="light"] .logo-text::after { display: none; }
-[data-theme="light"] .replay-panel { background: linear-gradient(135deg, #fff, #f8f8f5); }
-[data-theme="light"] .streak-panel { background: linear-gradient(135deg, #fff, #f8f8f5); }
+[data-theme="light"] .replay-panel { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
+[data-theme="light"] .streak-panel { background: linear-gradient(135deg, #fff, #f8f8f5) !important; }
 [data-theme="light"] .replay-detail .replay-stat { background: rgba(0,0,0,0.03) !important; }
 [data-theme="light"] .streak-card { background: rgba(0,0,0,0.03) !important; }
+[data-theme="light"] .feed-badge { background: rgba(0,0,0,0.05); border-color: rgba(0,0,0,0.1); }
+[data-theme="light"] .theme-toggle { background: rgba(0,0,0,0.03); }
+[data-theme="light"] .tf-card .tf-value { color: #333; }
+[data-theme="light"] .tf-card .tf-entry { color: #555; }
+[data-theme="light"] .tp-level { color: #333; }
+[data-theme="light"] .sl-level { color: #333; }
+[data-theme="light"] .progress-bar { background: rgba(0,0,0,0.08); }
+[data-theme="light"] .history-item { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .replay-item { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .streak-info { color: #555; }
+[data-theme="light"] .modal-content { background: #fff; border: 1px solid #ddd; }
 
 .theme-toggle { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); cursor: pointer; font-size: 14px; transition: all 0.3s; flex-shrink: 0; }
 .theme-toggle:hover { border-color: var(--gold); box-shadow: 0 0 12px rgba(255,215,0,0.15); }
 .theme-toggle svg { width: 16px; height: 16px; }
 .header-right { display: flex; align-items: center; gap: 10px; }
-
- --card: #1a1a25; --border: #333;
-  --gold: #FFD700; --gold-orange: #FFA500;
-  --green: #00e676; --red: #ff4444; --yellow: #ffcc00;
-  --text: #e0e0e0; --muted: #666;
-}
 body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; min-height: 100vh; }
 
 .header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; background: linear-gradient(135deg, #12121a, #1a1a25); border-bottom: 1px solid var(--border); }
