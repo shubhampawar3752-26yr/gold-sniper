@@ -89,7 +89,14 @@ const ALLTP_COOLDOWN_MS: Record<string, number> = {
 };
 
 // Min EMA spread as % of ATR — prevents entering when EMAs are barely crossed
-const MIN_EMA_SPREAD_ATR_PCT = 0.15; // EMA9-EMA21 must be >= 15% of ATR apart
+const MIN_EMA_SPREAD_ATR_PCT: Record<string, number> = {
+  '1M':  0.05,  // 5% of ATR — 1M has tight spreads, don't over-filter
+  '5M':  0.08,  // 8% of ATR
+  '15M': 0.10,  // 10% of ATR
+  '30M': 0.12,  // 12% of ATR
+  '1H':  0.15,  // 15% of ATR
+  '4H':  0.15,  // 15% of ATR
+};
 
 const TV_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -637,13 +644,13 @@ Deno.serve(async (req) => {
     const done = s.slHit || s.allDone || s.entry === 0;
 
     // ── Smart entry: check if pending limit order should fill ──
-    if (s.pendingEntry > 0 && !done) {
+    if (s.pendingEntry > 0) {
       const pendingAge = s.pendingTime ? Date.now() - new Date(s.pendingTime).getTime() : 0;
       const timeout = SMART_ENTRY_TIMEOUT_MS[l] || 300000;
 
       // Check if price reached the limit level
-      const fillLong = s.pendingDir === 'long' && tfPrice <= s.pendingEntry;
-      const fillShort = s.pendingDir === 'short' && tfPrice >= s.pendingEntry;
+      const fillLong = s.pendingDir === 'long' && livePrice <= s.pendingEntry;
+      const fillShort = s.pendingDir === 'short' && livePrice >= s.pendingEntry;
 
       // Check if EMA crossover has reversed (cancel pending)
       const emaReversed = (s.pendingDir === 'long' && ema9 < ema21) || (s.pendingDir === 'short' && ema9 > ema21);
@@ -725,7 +732,7 @@ Deno.serve(async (req) => {
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
-        const limitPrice = dir === 'long' ? (tfPrice || livePrice) - pullback : (tfPrice || livePrice) + pullback;
+        const limitPrice = dir === 'long' ? livePrice - pullback : livePrice + pullback;
 
         s.pendingEntry = limitPrice;
         s.pendingDir = dir;
@@ -747,7 +754,7 @@ Deno.serve(async (req) => {
 
       // Check EMA spread strength — avoid choppy entries when EMAs are barely crossed
       const emaSpread = Math.abs(ema9 - ema21);
-      const minSpread = atr * MIN_EMA_SPREAD_ATR_PCT;
+      const minSpread = atr * (MIN_EMA_SPREAD_ATR_PCT[l] || 0.10);
       const spreadOK = emaSpread >= minSpread;
 
       if (!inAllTPCooldown && spreadOK) {
@@ -760,7 +767,7 @@ Deno.serve(async (req) => {
         } else {
           // Smart entry: limit at pullback
           const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
-          const limitPrice = dir === 'long' ? (tfPrice || livePrice) - pullback : (tfPrice || livePrice) + pullback;
+          const limitPrice = dir === 'long' ? livePrice - pullback : livePrice + pullback;
 
           s.pendingEntry = limitPrice;
           s.pendingDir = dir;
@@ -795,11 +802,12 @@ Deno.serve(async (req) => {
 
       // EMA spread filter
       const emaSpreadSL = Math.abs(ema9 - ema21);
-      const minSpreadSL = atr * MIN_EMA_SPREAD_ATR_PCT;
+      const minSpreadSL = atr * (MIN_EMA_SPREAD_ATR_PCT[l] || 0.10);
       const spreadOKSL = emaSpreadSL >= minSpreadSL;
 
-      // Enter on: fresh crossover OR already-flipped EMA (missed crossover)
-      const shouldEnter = ((crossUp || crossDn) || alreadyFlipped) && !inCooldown && spreadOKSL;
+      // Enter on: fresh crossover OR already-flipped OR EMA has clear direction
+      // (After SL hit, if EMA is still signaling a direction, we should re-enter)
+      const shouldEnter = !inCooldown && spreadOKSL;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
@@ -811,7 +819,7 @@ Deno.serve(async (req) => {
         } else {
           // Smart entry: limit at pullback
           const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
-          const limitPrice = dir === 'long' ? (tfPrice || livePrice) - pullback : (tfPrice || livePrice) + pullback;
+          const limitPrice = dir === 'long' ? livePrice - pullback : livePrice + pullback;
 
           s.pendingEntry = limitPrice;
           s.pendingDir = dir;
