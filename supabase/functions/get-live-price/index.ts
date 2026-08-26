@@ -167,14 +167,15 @@ Deno.serve(async (req) => {
     tradeHistory = await r.json();
   } catch (e) { console.error('History error:', (e as Error).message); }
 
+  // Stats from trade_history (source of truth, not alerts)
   let stats: any = { totalEntries: 0, totalTPs: 0, totalSLs: 0, totalComplete: 0 };
   try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/alerts?select=type`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
-    const allAlerts = await r.json();
-    stats.totalEntries = allAlerts.filter((a: any) => a.type === 'entry').length;
-    stats.totalTPs = allAlerts.filter((a: any) => a.type === 'tp').length;
-    stats.totalSLs = allAlerts.filter((a: any) => a.type === 'sl').length;
-    stats.totalComplete = allAlerts.filter((a: any) => a.type === 'alldone').length;
+    const r = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,tp1_hit,tp2_hit,tp3_hit,exit_reason`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
+    const trades = await r.json();
+    stats.totalEntries = trades.length;
+    stats.totalTPs = trades.filter((t: any) => t.tp1_hit || t.tp2_hit || t.tp3_hit).length;
+    stats.totalSLs = trades.filter((t: any) => !t.tp1_hit && (t.exit_reason === 'sl_hit' || t.exit_reason === 'ema_flip')).length;
+    stats.totalComplete = trades.filter((t: any) => t.exit_reason === 'all_tps_hit').length;
   } catch (e) { console.error('Stats error:', (e as Error).message); }
 
   const TF_ORDER = ['1M', '5M', '15M', '30M', '1H', '4H'];
