@@ -160,7 +160,8 @@ function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
   const dir = s.dir === 'long' ? 'buy' : 'sell';
 
   if (isSLHit(px, s.sl, s.dir)) {
-    if (!prev.slHit) al.push({ type: 'sl', timeframe: l, sl: s.sl, entry: s.entry, direction: dir, cycle: s.cycle, price: px, sent: false });
+    // Don't record SL alert if TP1 was already hit — it's a winning trade
+    if (!s.tp1Hit && !prev.slHit) al.push({ type: 'sl', timeframe: l, sl: s.sl, entry: s.entry, direction: dir, cycle: s.cycle, price: px, sent: false });
     s.slHit = true;
     return;
   }
@@ -366,9 +367,9 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
     });
 
     // Update cumulative trade_stats via atomic RPC function
-    const isWin = pnlPips > 0 || (s.tp1Hit && exitReason === 'ema_flip');
-    const isLoss = pnlPips < 0 && !(s.tp1Hit && exitReason === 'ema_flip');
-    const isBE = pnlPips === 0 && !(s.tp1Hit && exitReason === 'ema_flip');
+    const isWin = s.tp1Hit || pnlPips > 0;
+    const isLoss = !s.tp1Hit && pnlPips < 0;
+    const isBE = !s.tp1Hit && pnlPips === 0;
     const isAllTPs = tpsHit === 3;
     try {
       await fetch(`${SUPA_URL}/rest/v1/rpc/update_trade_stats`, {
@@ -713,7 +714,10 @@ Deno.serve(async (req) => {
 
       if ((flippedToShort && s.dir === 'long') || (flippedToLong && s.dir === 'short')) {
         if (!s.slHit && !s.allDone) {
-          alerts.push({ type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice, sent: false });
+          // Don't record SL alert if TP1 was already hit — it's a winning trade
+          if (!s.tp1Hit) {
+            alerts.push({ type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice, sent: false });
+          }
           s.slHit = true;
         }
       }
@@ -891,20 +895,26 @@ Deno.serve(async (req) => {
         exitReason = 'all_tps_hit';
         exitPrice = s.tp3; // Last TP price
       } else if (s.slHit) {
-        // Check if SL was hit by EMA flip (price = s.entry in flip alert) or actual SL
-        const lastAlert = alerts.find(a => a.timeframe === l && a.type === 'sl' && a.cycle === s.cycle);
-        if (lastAlert && lastAlert.sl === s.entry) {
-          exitReason = 'ema_flip';
-          // If TP1 was hit, exit at SL price (breakeven or TP1/TP2 level)
-          // This ensures a trade that hit TP1 is NOT counted as a loss
-          if (s.tp1Hit) {
-            exitPrice = s.sl; // SL is at breakeven (or TP1/TP2 if trailing)
-          } else {
-            exitPrice = lastAlert.price || s.entry;
-          }
+        // If TP1 was hit, record the profit at the highest TP reached
+        if (s.tp1Hit && !s.tp2Hit) {
+          exitReason = 'tp1_locked';
+          exitPrice = s.tp1; // Exit at TP1 price — record TP1 profit
+        } else if (s.tp2Hit && !s.tp3Hit) {
+          exitReason = 'tp2_locked';
+          exitPrice = s.tp2; // Exit at TP2 price — record TP2 profit
+        } else if (s.tp1Hit && s.tp2Hit) {
+          exitReason = 'tp2_locked';
+          exitPrice = s.tp2; // Both TP1 and TP2 hit
         } else {
-          exitReason = 'sl_hit';
-          exitPrice = s.sl;
+          // No TP was hit — actual SL hit, record as loss
+          const lastAlert = alerts.find(a => a.timeframe === l && a.type === 'sl' && a.cycle === s.cycle);
+          if (lastAlert && lastAlert.sl === s.entry) {
+            exitReason = 'ema_flip';
+            exitPrice = lastAlert.price || s.entry;
+          } else {
+            exitReason = 'sl_hit';
+            exitPrice = s.sl;
+          }
         }
       }
       
