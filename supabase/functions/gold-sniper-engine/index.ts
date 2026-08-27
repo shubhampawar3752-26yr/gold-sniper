@@ -343,7 +343,7 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
   
   // Calculate PnL in pips (gold: 1 pip = $0.01, but we'll use $1 = 1 pip for simplicity)
   let pnlPips = 0;
-  if (exitReason === 'sl_hit' || exitReason === 'ema_flip' || exitReason === 'tp1_locked') {
+  if (exitReason === 'sl_hit' || exitReason === 'ema_flip' || exitReason === 'tp1_locked' || exitReason === 'tp2_locked') {
     pnlPips = s.dir === 'long' ? exitPrice - s.entry : s.entry - exitPrice;
   } else if (exitReason === 'all_tps_hit') {
     pnlPips = s.dir === 'long' ? s.tp3 - s.entry : s.entry - s.tp3;
@@ -356,6 +356,8 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
     exitLevel = 'tp3';
   } else if (exitReason === 'tp1_locked') {
     exitLevel = 'tp1';
+  } else if (exitReason === 'tp2_locked') {
+    exitLevel = 'tp2';
   } else if (exitReason === 'sl_hit') {
     if (s.slMovedToTP1) exitLevel = 'tp1';
     else if (s.slMovedToBE) exitLevel = 'breakeven';
