@@ -906,31 +906,26 @@ Deno.serve(async (req) => {
     }
     // ── SL hit: enter new trade on fresh crossover OR if EMA already flipped ──
     else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
-      // EMA flip confirmation for 1M/5M: require 2 consecutive checks showing opposite direction
+      // EMA flip detection: is current EMA direction opposite to closed trade?
       const currentLong = ema9 > ema21;
       const wasLongTrade = s.dir === 'long';
       const wasShortTrade = s.dir === 'short';
-      const emaFlippedAgainst = (currentLong && wasShortTrade) || (!currentLong && wasLongTrade);
+      const alreadyFlipped = (currentLong && wasShortTrade) || (!currentLong && wasLongTrade);
 
-      if (emaFlippedAgainst && (l === '1M' || l === '5M')) {
+      // EMA flip confirmation for 1M/5M: require 2 consecutive checks before re-entering
+      // This prevents instant re-entry on noisy flips
+      if (alreadyFlipped && (l === '1M' || l === '5M')) {
         s.flipConfirmCount = (s.flipConfirmCount || 0) + 1;
         if (s.flipConfirmCount < 2) {
           console.log(`[${l}] EMA flip detected but waiting for confirmation (${s.flipConfirmCount}/2)`);
-          // Don't exit yet — update prev EMAs and continue
           s.prevEma9 = ema9; s.prevEma21 = ema21;
-          continue;
+          continue; // Skip re-entry this cycle, try again next run
         }
+        s.flipConfirmCount = 0; // Reset after confirmation
       }
 
       const crossUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21;
       const crossDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21;
-
-      // Also detect if EMA direction is already OPPOSITE to the closed trade direction
-      // (crossover happened gradually and was missed tick-by-tick)
-      const currentLong = ema9 > ema21;
-      const wasShortTrade = s.dir === 'short';
-      const wasLongTrade = s.dir === 'long';
-      const alreadyFlipped = (currentLong && wasShortTrade) || (!currentLong && wasLongTrade);
 
       const cooldownMs = FLIP_COOLDOWN_MS[l] || 0;
       const lastFlip = s.lastFlipTime ? new Date(s.lastFlipTime).getTime() : 0;
@@ -946,8 +941,9 @@ Deno.serve(async (req) => {
       const minAtrSL = MIN_ATR[l] || 0;
       const atrOKSL = atr >= minAtrSL;
 
-      // RSI filter: skip if RSI is in neutral zone (choppy market)
-      const rsiNeutral = rsi != null && rsi >= 40 && rsi <= 60;
+      // RSI filter: only for 1M/5M (choppy market prevention)
+      // Higher TFs should re-enter regardless of RSI — RSI 40-60 is normal in trends
+      const rsiNeutral = (l === '1M' || l === '5M') && rsi != null && rsi >= 40 && rsi <= 60;
       const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL;
 
       if (shouldEnter) {
@@ -970,6 +966,7 @@ Deno.serve(async (req) => {
           s.dir = dir;
           s.lastSignal = signal;
           s.lastFlipTime = new Date().toISOString();
+          s.flipConfirmCount = 0;
           console.log(`[${l}] Smart entry PENDING: cycle ${s.pendingCycle} (${signal}) limit=$${limitPrice.toFixed(2)} | trigger=${crossUp||crossDn ? 'crossover' : 'already-flipped'}`);
         }
       }
