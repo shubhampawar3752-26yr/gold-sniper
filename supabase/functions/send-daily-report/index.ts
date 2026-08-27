@@ -46,6 +46,60 @@ Deno.serve(async (req) => {
   const states: any[] = await r2.json();
   const state = states[0]?.states || {};
 
+  // Fetch trade_history for PnL data
+  let tradeHistory: any[] = [];
+  try {
+    const since = mode === 'morning' ? new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString() : `${today}T00:00:00+05:30`;
+    const rh = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+    });
+    tradeHistory = await rh.json();
+  } catch (e) { console.error('Trade history fetch failed:', (e as Error).message); }
+
+  // Fetch ALL trade_history for cumulative stats
+  let allTradeHistory: any[] = [];
+  try {
+    const rah = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,pnl_pips,pnl_percent,tp1_hit,exit_reason&order=id.asc`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+    });
+    allTradeHistory = await rah.json();
+  } catch (e) { console.error('All trade history fetch failed:', (e as Error).message); }
+
+  // Fetch trade_summary
+  let tradeSummary: any = null;
+  try {
+    const rs = await fetch(`${SUPA_URL}/rest/v1/trade_summary?select=*&order=id.desc&limit=1`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+    });
+    const summaries = await rs.json();
+    tradeSummary = summaries[0] || null;
+  } catch (e) { console.error('Trade summary fetch failed:', (e as Error).message); }
+
+  // Fetch trade_stats per timeframe
+  let tradeStats: any[] = [];
+  try {
+    const rst = await fetch(`${SUPA_URL}/rest/v1/trade_stats?select=*&order=timeframe.asc`, {
+      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+    });
+    tradeStats = await rst.json();
+  } catch (e) { console.error('Trade stats fetch failed:', (e as Error).message); }
+
+  // Compute cumulative PnL from all trade history
+  const cumPips = allTradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_pips || 0), 0);
+  const cumPnl = allTradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_percent || 0), 0);
+  const cumWins = allTradeHistory.filter((t: any) => t.tp1_hit || parseFloat(t.pnl_pips) > 0).length;
+  const cumLosses = allTradeHistory.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) < 0).length;
+  const cumWinRate = allTradeHistory.length > 0 ? Math.round((cumWins / allTradeHistory.length) * 100) : 0;
+
+  // Today's PnL from tradeHistory
+  const todayPips = tradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_pips || 0), 0);
+  const todayPnl = tradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_percent || 0), 0);
+  const todayWins = tradeHistory.filter((t: any) => t.tp1_hit || parseFloat(t.pnl_pips) > 0).length;
+  const todayLosses = tradeHistory.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) < 0).length;
+  const todayWinRate = tradeHistory.length > 0 ? Math.round((todayWins / tradeHistory.length) * 100) : 0;
+  const todayBest = tradeHistory.length > 0 ? Math.max(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
+  const todayWorst = tradeHistory.length > 0 ? Math.min(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
+
   // Fetch ALL entry alerts for time-based entry price lookup
   // TP/SL alerts don't carry entry/direction/cycle fields, so we match by timeframe + time
   const rEntries = await fetch(
@@ -230,14 +284,61 @@ Deno.serve(async (req) => {
   </style></head><body>`;
 
   html += `<div class="header"><h1>GOLD SNIPER — ${title}</h1><div class="date">${now} (IST) • ${period}</div></div>`;
+  const pnlColor = todayPips >= 0 ? 'green' : 'red';
+  const cumPnlColor = cumPips >= 0 ? 'green' : 'red';
   html += `<div class="stats">
-    <div class="stat"><div class="num gold">${totalEntries}</div><div class="label">ENTRIES</div></div>
-    <div class="stat"><div class="num green">${totalTPs}</div><div class="label">TP HITS</div></div>
-    <div class="stat"><div class="num red">${totalSLs}</div><div class="label">SL HITS</div></div>
-    <div class="stat"><div class="num gold">${totalDones}</div><div class="label">FULL CYCLES</div></div>
-    <div class="stat"><div class="num ${overallWR >= 50 ? 'green' : 'red'}">${overallWR}%</div><div class="label">WIN RATE</div></div>
+    <div class="stat"><div class="num gold">${tradeHistory.length || totalEntries}</div><div class="label">TRADES</div></div>
+    <div class="stat"><div class="num green">${todayWins}</div><div class="label">WINS</div></div>
+    <div class="stat"><div class="num red">${todayLosses}</div><div class="label">LOSSES</div></div>
+    <div class="stat"><div class="num ${todayWinRate >= 50 ? 'green' : 'red'}">${todayWinRate}%</div><div class="label">WIN RATE</div></div>
+    <div class="stat"><div class="num ${pnlColor}">${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)}</div><div class="label">TODAY PIPS</div></div>
+    <div class="stat"><div class="num ${pnlColor}">${todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)}%</div><div class="label">TODAY PnL%</div></div>
     <div class="stat"><div class="num green">${activeTrades.length}</div><div class="label">ACTIVE</div></div>
   </div>`;
+
+  // Cumulative summary section
+  html += `<div class="tf-section" style="background:linear-gradient(135deg,#1a1a25,#12121a);border-color:#FFD70033">
+    <div class="tf-header"><span class="tf-name" style="font-size:16px">📊 ALL-TIME SUMMARY</span></div>
+    <div class="stats" style="margin-bottom:0">
+      <div class="stat"><div class="num gold">${allTradeHistory.length}</div><div class="label">TOTAL TRADES</div></div>
+      <div class="stat"><div class="num green">${cumWins}</div><div class="label">TOTAL WINS</div></div>
+      <div class="stat"><div class="num red">${cumLosses}</div><div class="label">TOTAL LOSSES</div></div>
+      <div class="stat"><div class="num ${cumWinRate >= 50 ? 'green' : 'red'}">${cumWinRate}%</div><div class="label">WIN RATE</div></div>
+      <div class="stat"><div class="num ${cumPnlColor}">${cumPips >= 0 ? '+' : ''}${cumPips.toFixed(1)}</div><div class="label">TOTAL PIPS</div></div>
+      <div class="stat"><div class="num ${cumPnlColor}">${cumPnl >= 0 ? '+' : ''}${cumPnl.toFixed(2)}%</div><div class="label">TOTAL PnL%</div></div>
+    </div>`;
+
+  // Per-timeframe stats from trade_stats
+  if (tradeStats.length > 0) {
+    html += `<table style="margin-top:10px"><tr><th>Timeframe</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Total Pips</th><th>Best</th><th>Worst</th><th>All-TP</th></tr>`;
+    for (const ts of tradeStats) {
+      const tPips = parseFloat(ts.total_pips || 0);
+      const pipCls = tPips >= 0 ? 'green' : 'red';
+      const wr = parseFloat(ts.win_rate || 0);
+      const wrCls = wr >= 50 ? 'green' : 'red';
+      html += `<tr><td><b style="color:#FFD700">${ts.timeframe}</b></td><td>${ts.total_trades}</td><td class="green">${ts.wins}</td><td class="red">${ts.losses}</td><td class="${wrCls}">${wr}%</td><td class="${pipCls}">${tPips >= 0 ? '+' : ''}${tPips.toFixed(1)}</td><td class="green">${parseFloat(ts.best_trade||0).toFixed(1)}</td><td class="red">${parseFloat(ts.worst_trade||0).toFixed(1)}</td><td class="gold">${ts.all_tp_trades}</td></tr>`;
+    }
+    html += `</table>`;
+  }
+  html += `</div>`;
+
+  // Today's trade history with PnL
+  if (tradeHistory.length > 0) {
+    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">📋 TODAY'S CLOSED TRADES (${tradeHistory.length})</span></div>`;
+    html += `<table><tr><th>ID</th><th>TF</th><th>Dir</th><th>Entry</th><th>Exit</th><th>TP1</th><th>TPs</th><th>Exit Reason</th><th>PnL Pips</th><th>PnL %</th><th>Duration</th></tr>`;
+    for (const t of tradeHistory) {
+      const dir = t.direction || '';
+      const dirCls = dir === 'long' ? 'green' : 'red';
+      const pnl = parseFloat(t.pnl_pips || 0);
+      const pnlPct = parseFloat(t.pnl_percent || 0);
+      const pnlCls = pnl >= 0 ? 'green' : 'red';
+      const tp1Hit = t.tp1_hit ? '✅' : '❌';
+      const dur = t.duration_minutes || 0;
+      const entryT = t.entry_time ? String(t.entry_time).substring(11, 16) : '-';
+      html += `<tr><td>#${t.id}</td><td><b>${t.timeframe}</b></td><td class="${dirCls}">${dir.toUpperCase()}</td><td>$${parseFloat(t.entry_price||0).toFixed(2)}</td><td>$${parseFloat(t.exit_price||0).toFixed(2)}</td><td>${tp1Hit}</td><td>${t.tps_hit||0}/3</td><td style="font-size:11px">${t.exit_reason||'-'}</td><td class="${pnlCls}"><b>${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}</b></td><td class="${pnlCls}">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td><td style="font-size:11px;color:#888">${dur}m</td></tr>`;
+    }
+    html += `</table></div>`;
+  }
 
   // Timeframe sections
   for (const tf of TFS) {
@@ -323,12 +424,12 @@ html += `</div>`;
     html += `<div class="tf-section" style="text-align:center;color:#666;padding:24px">No trades in this period. System monitoring active 24/7.</div>`;
   }
 
-  html += `<div class="footer">Gold Sniper Trading System • EMA 9/21 Crossover • ${TFS.join(' / ')} • Auto ${mode} report at ${mode === 'morning' ? '09:00' : '23:00'} IST</div>`;
+  html += `<div class="footer">Gold Sniper Trading System • EMA 9/21 Crossover • ${TFS.join(' / ')} • ${allTradeHistory.length} total trades • ${cumPips >= 0 ? '+' : ''}${cumPips.toFixed(1)} cumulative pips</div>`;
   html += `</body></html>`;
 
   const subject = mode === 'morning'
-    ? `☀️ Gold Sniper Morning — ${today} | ${activeTrades.length} active, ${totalTPs} TPs, ${totalSLs} SLs | WR ${overallWR}%`
-    : `🎯 Gold Sniper Daily — ${today} | ${totalEntries} entries, ${totalTPs} TPs, ${totalSLs} SLs | WR ${overallWR}%`;
+    ? `☀️ Gold Sniper Morning — ${today} | ${tradeHistory.length} trades, ${todayWins}W/${todayLosses}L, ${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)} pips | WR ${todayWinRate}%`
+    : `🎯 Gold Sniper Daily — ${today} | ${tradeHistory.length} trades, ${todayWins}W/${todayLosses}L, ${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)} pips | WR ${todayWinRate}%`;
 
   // Send Email via Resend (styled HTML, no attachment)
   let emailResult = { success: false, error: 'No RESEND_API_KEY' };
@@ -353,7 +454,11 @@ html += `</div>`;
 
   // WhatsApp summary
   let waMsg = `*GOLD SNIPER — ${mode === 'morning' ? 'MORNING' : 'DAILY'} REPORT*\n${now} (IST)\n\n`;
-  waMsg += `📊 *${totalEntries} entries | ${totalTPs} TPs | ${totalSLs} SLs | WR ${overallWR}%*\n\n`;
+  waMsg += `📊 *TODAY: ${tradeHistory.length || totalEntries} trades | ${todayWins}W ${todayLosses}L | WR ${todayWinRate}%*\n`;
+  waMsg += `💰 *Today PnL: ${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)} pips (${todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)}%)*\n`;
+  waMsg += `📈 Best: +${todayBest.toFixed(1)} | Worst: ${todayWorst.toFixed(1)} pips\n\n`;
+  waMsg += `*ALL-TIME: ${allTradeHistory.length} trades | ${cumWins}W ${cumLosses}L | WR ${cumWinRate}%*\n`;
+  waMsg += `*Total PnL: ${cumPips >= 0 ? '+' : ''}${cumPips.toFixed(1)} pips (${cumPnl >= 0 ? '+' : ''}${cumPnl.toFixed(2)}%)*\n\n`;
   for (const tf of TFS) {
     const d = tfData[tf];
     if (d.entries.length === 0 && d.tps.length === 0 && d.sls.length === 0) continue;
@@ -402,7 +507,13 @@ html += `</div>`;
     mode, date: today,
     email: emailResult,
     whatsapp: waResults,
-    overallWinRate: overallWR,
-    stats: { entries: totalEntries, tps: totalTPs, sls: totalSLs, fullCycles: totalDones, activeTrades: activeTrades.length }
+    todayPips: Math.round(todayPips * 100) / 100,
+    todayPnl: Math.round(todayPnl * 100) / 100,
+    todayWinRate,
+    cumulativePips: Math.round(cumPips * 100) / 100,
+    cumulativePnl: Math.round(cumPnl * 100) / 100,
+    cumulativeWinRate: cumWinRate,
+    totalTrades: allTradeHistory.length,
+    stats: { trades: tradeHistory.length, wins: todayWins, losses: todayLosses, activeTrades: activeTrades.length }
   }), { headers: { 'Content-Type': 'application/json' } });
 });
