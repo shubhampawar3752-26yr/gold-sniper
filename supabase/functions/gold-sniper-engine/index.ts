@@ -14,8 +14,31 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 // ── Constants ──
-const ATR_SL_MULT = 2;          // SL = 2x ATR
-const RR = [1, 2, 3];           // TP1=1R(2xATR) TP2=2R(4xATR) TP3=3R(6xATR)
+const ATR_SL_MULT = 2;          // SL = 2x ATR (default for 15M+)
+const RR = [1, 2, 3];           // TP1=1R(2xATR) TP2=2R(4xATR) TP3=3R(6xATR) (default for 15M+)
+
+// ── 1M/5M overrides: tighter TP1, wider SL, better win rate ──
+// Problem: 1M WR=33%, 5M WR=40% — TP1=SL distance means noise hits SL first
+// Fix: TP1 closer (1.5xATR), SL wider (2.5xATR) → TP1 is 0.6x SL distance
+const TF_SL_MULT: Record<string, number> = {
+  '1M': 2.5, '5M': 2.5,                          // wider SL for noise tolerance
+  '15M': 2, '30M': 2, '1H': 2, '4H': 2,          // unchanged
+};
+const TF_RR: Record<string, number[]> = {
+  '1M':  [0.75, 1.5, 2.5],   // TP1=1.5xATR TP2=3xATR TP3=5xATR (easier TP1)
+  '5M':  [0.75, 1.5, 2.5],   // same
+  '15M': [1, 2, 3],           // unchanged
+  '30M': [1, 2, 3],
+  '1H':  [1, 2, 3],
+  '4H':  [1, 2, 3],
+};
+
+// ── Min ATR filter: skip trades when volatility too low ──
+const MIN_ATR: Record<string, number> = {
+  '1M': 1.5,    // below 1.5 ATR = too tight, noise will hit SL
+  '5M': 2.0,
+  '15M': 0, '30M': 0, '1H': 0, '4H': 0,  // no filter for higher TFs
+};
 const TICKS = 3;                // 3 ticks per run
 const TICK_MS = 10000;          // 10s between ticks
 const TV_SYMBOL = 'OANDA:XAUUSD';
@@ -68,7 +91,12 @@ function isSessionActive(tf: string, date: Date): boolean {
 }
 
 // ── Smart entry: limit order at slight pullback instead of market price ──
-const SMART_ENTRY_PULLBACK_ATR = 0.3; // Enter at 0.3x ATR pullback from current price
+const SMART_ENTRY_PULLBACK_ATR = 0.3; // Default: 0.3x ATR pullback
+const TF_PULLBACK_ATR: Record<string, number> = {
+  '1M': 0.15,   // tighter pullback — 1M moves fast, smaller pullback = more fills
+  '5M': 0.25,
+  '15M': 0.3, '30M': 0.3, '1H': 0.3, '4H': 0.3,
+};
 const SMART_ENTRY_TIMEOUT_MS: Record<string, number> = {
   '1M':  5 * 60 * 1000,   // 5 min to fill
   '5M':  5 * 60 * 1000,   // 5 min
@@ -146,13 +174,15 @@ function ns() {
   };
 }
 
-function setLevels(s: any, a: number) {
-  const r = a * ATR_SL_MULT;
+function setLevels(s: any, a: number, l: string) {
+  const slMult = TF_SL_MULT[l] || ATR_SL_MULT;
+  const rr = TF_RR[l] || RR;
+  const r = a * slMult;
   s.sl = s.dir === 'long' ? s.entry - r : s.entry + r;
-  s.originalSl = s.sl; // Save original SL for trailing reference
-  s.tp1 = s.dir === 'long' ? s.entry + r * RR[0] : s.entry - r * RR[0];
-  s.tp2 = s.dir === 'long' ? s.entry + r * RR[1] : s.entry - r * RR[1];
-  s.tp3 = s.dir === 'long' ? s.entry + r * RR[2] : s.entry - r * RR[2];
+  s.originalSl = s.sl;
+  s.tp1 = s.dir === 'long' ? s.entry + r * rr[0] : s.entry - r * rr[0];
+  s.tp2 = s.dir === 'long' ? s.entry + r * rr[1] : s.entry - r * rr[1];
+  s.tp3 = s.dir === 'long' ? s.entry + r * rr[2] : s.entry - r * rr[2];
 }
 
 function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
@@ -752,7 +782,7 @@ Deno.serve(async (req) => {
         s.slMovedToBE = false; s.slMovedToTP1 = false; s.slMovedToTP2 = false;
         s.slHit = s.allDone = false;
         s.lastSignal = s.pendingDir === 'long' ? 'buy' : 'sell';
-        setLevels(s, s.pendingAtr);
+        setLevels(s, s.pendingAtr, l);
         s.entryTime = new Date().toISOString();
 
         const ai = aiAnalysis[l];
@@ -821,7 +851,7 @@ Deno.serve(async (req) => {
         console.log(`[${l}] Skipping entry — outside active session (Asian chop filter)`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
-        const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
+        const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
         const limitPrice = dir === 'long' ? livePrice - pullback : livePrice + pullback;
 
         s.pendingEntry = limitPrice;
@@ -857,7 +887,7 @@ Deno.serve(async (req) => {
           console.log(`[${l}] All TPs hit — waiting for active session (Asian chop filter)`);
         } else {
           // Smart entry: limit at pullback
-          const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
+          const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
           const limitPrice = dir === 'long' ? livePrice - pullback : livePrice + pullback;
 
           s.pendingEntry = limitPrice;
@@ -876,6 +906,22 @@ Deno.serve(async (req) => {
     }
     // ── SL hit: enter new trade on fresh crossover OR if EMA already flipped ──
     else if (doneNow && s.prevEma9 != null && s.prevEma21 != null) {
+      // EMA flip confirmation for 1M/5M: require 2 consecutive checks showing opposite direction
+      const currentLong = ema9 > ema21;
+      const wasLongTrade = s.dir === 'long';
+      const wasShortTrade = s.dir === 'short';
+      const emaFlippedAgainst = (currentLong && wasShortTrade) || (!currentLong && wasLongTrade);
+
+      if (emaFlippedAgainst && (l === '1M' || l === '5M')) {
+        s.flipConfirmCount = (s.flipConfirmCount || 0) + 1;
+        if (s.flipConfirmCount < 2) {
+          console.log(`[${l}] EMA flip detected but waiting for confirmation (${s.flipConfirmCount}/2)`);
+          // Don't exit yet — update prev EMAs and continue
+          s.prevEma9 = ema9; s.prevEma21 = ema21;
+          continue;
+        }
+      }
+
       const crossUp = s.prevEma9 <= s.prevEma21 && ema9 > ema21;
       const crossDn = s.prevEma9 >= s.prevEma21 && ema9 < ema21;
 
@@ -896,11 +942,13 @@ Deno.serve(async (req) => {
       const minSpreadSL = atr * (MIN_EMA_SPREAD_ATR_PCT[l] || 0.10);
       const spreadOKSL = emaSpreadSL >= minSpreadSL;
 
-      // Enter on: fresh crossover OR already-flipped OR EMA has clear direction
-      // (After SL hit, if EMA is still signaling a direction, we should re-enter)
+      // Min ATR filter
+      const minAtrSL = MIN_ATR[l] || 0;
+      const atrOKSL = atr >= minAtrSL;
+
       // RSI filter: skip if RSI is in neutral zone (choppy market)
       const rsiNeutral = rsi != null && rsi >= 40 && rsi <= 60;
-      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral;
+      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
@@ -911,7 +959,7 @@ Deno.serve(async (req) => {
           console.log(`[${l}] Crossover detected — skipping entry (outside active session)`);
         } else {
           // Smart entry: limit at pullback
-          const pullback = atr * SMART_ENTRY_PULLBACK_ATR;
+          const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
           const limitPrice = dir === 'long' ? livePrice - pullback : livePrice + pullback;
 
           s.pendingEntry = limitPrice;
