@@ -237,6 +237,50 @@ async function fetchTVIndicators(): Promise<Record<string, any>> {
   return await resp.json();
 }
 
+// ── DXY (US Dollar Index) fetch for signal confirmation ──
+// Inverse correlation: DXY bullish → gold bearish, DXY bearish → gold bullish
+// Uses 1H + 4H EMAs for macro trend direction
+const DXY_SYMBOL = 'TVC:DXY';
+
+async function fetchDXYIndicators(): Promise<{ dxyBullish: boolean | null; dxy1h: any; dxy4h: any; dxyPrice: number | null }> {
+  try {
+    const fields = ['EMA9|60', 'EMA21|60', 'close|60', 'EMA9|240', 'EMA21|240', 'close|240'];
+    const url = `https://scanner.tradingview.com/symbol?symbol=${encodeURIComponent(DXY_SYMBOL)}&fields=${fields.join(',')}`;
+    const resp = await fetch(url, { headers: TV_HEADERS });
+    if (!resp.ok) throw new Error(`DXY scanner HTTP ${resp.status}`);
+    const d = await resp.json();
+
+    const e9_1h = parseFloat(d['EMA9|60']);
+    const e21_1h = parseFloat(d['EMA21|60']);
+    const e9_4h = parseFloat(d['EMA9|240']);
+    const e21_4h = parseFloat(d['EMA21|240']);
+    const price = parseFloat(d['close|60'] || d['close|240']);
+
+    if (isNaN(e9_1h) || isNaN(e21_1h)) throw new Error('DXY 1H EMAs missing');
+
+    // DXY bullish if EMA9 > EMA21 on 1H (primary) — 4H as secondary confirmation
+    const dxy1hBullish = e9_1h > e21_1h;
+    const dxy4hBullish = !isNaN(e9_4h) && !isNaN(e21_4h) ? e9_4h > e21_4h : null;
+
+    // Macro trend: bullish if BOTH 1H and 4H agree, otherwise use 1H
+    const dxyBullish = dxy4hBullish !== null
+      ? (dxy1hBullish === dxy4hBullish ? dxy1hBullish : dxy1hBullish)  // if both agree, strong signal; if disagree, use 1H
+      : dxy1hBullish;
+
+    console.log(`DXY: 1H=${dxy1hBullish ? 'bullish' : 'bearish'} (EMA9=${e9_1h?.toFixed(2)} EMA21=${e21_1h?.toFixed(2)}) 4H=${dxy4hBullish === null ? 'N/A' : dxy4hBullish ? 'bullish' : 'bearish'} → macro=${dxyBullish ? 'bullish' : 'bearish'} price=${price?.toFixed(2) || 'N/A'}`);
+
+    return {
+      dxyBullish,
+      dxy1h: { e9: e9_1h, e21: e21_1h, bullish: dxy1hBullish, price: price || null },
+      dxy4h: { e9: e9_4h || null, e21: e21_4h || null, bullish: dxy4hBullish },
+      dxyPrice: price || null
+    };
+  } catch (e) {
+    console.error(`DXY fetch failed: ${(e as Error).message}`);
+    return { dxyBullish: null, dxy1h: null, dxy4h: null, dxyPrice: null };
+  }
+}
+
 async function fetchLivePrice(): Promise<number | null> {
   // Source 1: TwelveData API
   try {
@@ -732,6 +776,14 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: false, error: 'No live price', errors, timestamp: now }), { status: 503, headers: CORS });
   }
 
+  // ── Fetch DXY for signal confirmation ──
+  let dxyData: { dxyBullish: boolean | null; dxy1h: any; dxy4h: any; dxyPrice: number | null } = { dxyBullish: null, dxy1h: null, dxy4h: null, dxyPrice: null };
+  try {
+    dxyData = await fetchDXYIndicators();
+  } catch (e) {
+    errors.push(`DXY fetch: ${(e as Error).message}`);
+  }
+
   // ── Fetch AI Candle Scanner analysis ──
   try {
     aiAnalysis = await fetchAIAnalysis();
@@ -881,11 +933,22 @@ Deno.serve(async (req) => {
         }
       }
 
+      // DXY confirmation: gold long needs DXY bearish, gold short needs DXY bullish
+      let dxyConfirmedFirst = true;
+      if (dxyData.dxyBullish !== null) {
+        dxyConfirmedFirst = (dir === 'long' && !dxyData.dxyBullish) || (dir === 'short' && dxyData.dxyBullish);
+        if (!dxyConfirmedFirst) {
+          console.log(`[${l}] First run — DXY counter-trend (gold=${dir}, DXY=${dxyData.dxyBullish ? 'bullish' : 'bearish'})`);
+        }
+      }
+
       // Session filter: skip new entries in Asian session for lower TFs
       if (!isSessionActive(l, new Date())) {
         console.log(`[${l}] Skipping entry — outside active session (Asian chop filter)`);
       } else if (!trendAlignedFirst) {
         console.log(`[1M] First run — skipping counter-trend entry`);
+      } else if (!dxyConfirmedFirst) {
+        console.log(`[${l}] First run — skipping DXY counter-trend entry`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
@@ -932,7 +995,17 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP) {
+      // DXY confirmation for All TPs re-entry
+      let dxyConfirmedAllTP = true;
+      if (dxyData.dxyBullish !== null) {
+        const dirAllTP = ema9 > ema21 ? 'long' : 'short';
+        dxyConfirmedAllTP = (dirAllTP === 'long' && !dxyData.dxyBullish) || (dirAllTP === 'short' && dxyData.dxyBullish);
+        if (!dxyConfirmedAllTP) {
+          console.log(`[${l}] All TPs — DXY counter-trend (gold=${dirAllTP}, DXY=${dxyData.dxyBullish ? 'bullish' : 'bearish'})`);
+        }
+      }
+
+      if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
 
@@ -1017,7 +1090,16 @@ Deno.serve(async (req) => {
         }
       }
 
-      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned;
+      // DXY confirmation for SL/flip re-entry
+      let dxyConfirmedSL = true;
+      if (dxyData.dxyBullish !== null) {
+        dxyConfirmedSL = (currentLong && !dxyData.dxyBullish) || (!currentLong && dxyData.dxyBullish);
+        if (!dxyConfirmedSL) {
+          console.log(`[${l}] SL/flip re-entry — DXY counter-trend (gold=${currentLong ? 'long' : 'short'}, DXY=${dxyData.dxyBullish ? 'bullish' : 'bearish'})`);
+        }
+      }
+
+      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
@@ -1193,6 +1275,12 @@ Deno.serve(async (req) => {
     timestamp: now,
     price: livePrice,
     source: 'tradingview-scanner',
+    dxy: dxyData.dxyBullish !== null ? {
+      trend: dxyData.dxyBullish ? 'bullish' : 'bearish',
+      price: dxyData.dxyPrice,
+      ema1h: dxyData.dxy1h,
+      ema4h: dxyData.dxy4h
+    } : null,
     alerts: alerts.length,
     alertsSent,
     alertDetails,
