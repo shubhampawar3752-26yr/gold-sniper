@@ -21,7 +21,7 @@ const RR = [1, 2, 3];           // TP1=1R(2xATR) TP2=2R(4xATR) TP3=3R(6xATR) (de
 // Problem: 1M WR=33%, 5M WR=40% — TP1=SL distance means noise hits SL first
 // Fix: TP1 closer (1.5xATR), SL wider (2.5xATR) → TP1 is 0.6x SL distance
 const TF_SL_MULT: Record<string, number> = {
-  '1M': 2.5, '5M': 2.5,                          // wider SL for noise tolerance
+  '1M': 2.0, '5M': 2.5,                          // 1M tighter SL = less risk + easier TP1
   '15M': 2, '30M': 2, '1H': 2, '4H': 2,          // unchanged
 };
 const TF_RR: Record<string, number[]> = {
@@ -171,6 +171,7 @@ function ns() {
     pendingEntry: 0, pendingDir: 'long', pendingTime: null as string | null,
     pendingAtr: 0, pendingCycle: 0,
     smartEntry: false,
+    flipExitConfirmCount: 0,
   };
 }
 
@@ -832,12 +833,32 @@ Deno.serve(async (req) => {
 
       if ((flippedToShort && s.dir === 'long') || (flippedToLong && s.dir === 'short')) {
         if (!s.slHit && !s.allDone) {
-          // Don't record SL alert if TP1 was already hit — it's a winning trade
-          if (!s.tp1Hit) {
-            alerts.push({ type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice, sent: false });
+          // 1M: require 3 consecutive flip confirmations before closing (anti-noise)
+          // Higher TFs close immediately (less noise)
+          if (l === '1M') {
+            s.flipExitConfirmCount = (s.flipExitConfirmCount || 0) + 1;
+            if (s.flipExitConfirmCount < 3) {
+              console.log(`[${l}] EMA flip exit waiting for confirmation (${s.flipExitConfirmCount}/3)`);
+            } else {
+              // Profit guard: don't close on flip if trade is still in profit
+              const inProfit = s.dir === 'long' ? tfPrice > s.entry : tfPrice < s.entry;
+              if (!s.tp1Hit && !inProfit) {
+                alerts.push({ type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice, sent: false });
+              }
+              s.slHit = true;
+              s.flipExitConfirmCount = 0;
+            }
+          } else {
+            // Don't record SL alert if TP1 was already hit — it's a winning trade
+            if (!s.tp1Hit) {
+              alerts.push({ type: 'sl', timeframe: l, sl: s.entry, entry: s.entry, direction: s.dir === 'long' ? 'buy' : 'sell', cycle: s.cycle, price: tfPrice, sent: false });
+            }
+            s.slHit = true;
           }
-          s.slHit = true;
         }
+      } else {
+        // EMA no longer flipped — reset confirmation counter
+        s.flipExitConfirmCount = 0;
       }
     }
 
@@ -914,12 +935,13 @@ Deno.serve(async (req) => {
       const wasShortTrade = s.dir === 'short';
       const alreadyFlipped = (currentLong && wasShortTrade) || (!currentLong && wasLongTrade);
 
-      // EMA flip confirmation for 1M/5M: require 2 consecutive checks before re-entering
-      // This prevents instant re-entry on noisy flips
+      // EMA flip confirmation for 1M/5M: require consecutive checks before re-entering
+      // 1M: 3 checks (180s), 5M: 2 checks (120s) — prevents instant re-entry on noisy flips
+      const flipChecksNeeded = l === '1M' ? 3 : 2;
       if (alreadyFlipped && (l === '1M' || l === '5M')) {
         s.flipConfirmCount = (s.flipConfirmCount || 0) + 1;
-        if (s.flipConfirmCount < 2) {
-          console.log(`[${l}] EMA flip detected but waiting for confirmation (${s.flipConfirmCount}/2)`);
+        if (s.flipConfirmCount < flipChecksNeeded) {
+          console.log(`[${l}] EMA flip detected but waiting for confirmation (${s.flipConfirmCount}/${flipChecksNeeded})`);
           s.prevEma9 = ema9; s.prevEma21 = ema21;
           continue; // Skip re-entry this cycle, try again next run
         }
