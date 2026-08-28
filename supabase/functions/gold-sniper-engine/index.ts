@@ -1428,6 +1428,28 @@ Deno.serve(async (req) => {
     updated: new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false }),
   };
 
+  // ── Store market context in states for dashboard ──
+  if (dxyData.dxyBullish !== null) {
+    states.__dxy = {
+      trend: dxyData.dxyBullish ? 'bullish' : 'bearish',
+      price: dxyData.dxyPrice,
+      ema1h: dxyData.dxy1h,
+      ema4h: dxyData.dxy4h,
+      updated: now
+    };
+  }
+  states.__confluence = {
+    bullish: computeConfluence(tvData, 'long'),
+    bearish: computeConfluence(tvData, 'short'),
+    updated: now
+  };
+  states.__news = {
+    blackout: newsStatus.blackout,
+    event: newsStatus.event,
+    minutes: newsStatus.minutes,
+    updated: now
+  };
+
   // ── Save trading state ──
   try {
     if (sid != null) await supaUpdate('trading_states', { states, last_run: now, prev_hits: newPrev }, sid);
