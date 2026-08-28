@@ -262,9 +262,11 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
   .trade-grid { grid-template-columns: 1fr; }
   .tf-grid { grid-template-columns: repeat(2, 1fr); }
   .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  .market-context { grid-template-columns: 1fr 1fr; }
+  .streak-grid { grid-template-columns: repeat(3, 1fr); }
   .header { padding: 12px 16px; }
   .container { padding: 16px; }
-  .price-card, .signal-engine, .history-panel { padding: 20px; }
+  .price-card, .signal-engine, .history-panel, .streak-panel, .replay-panel { padding: 20px; }
   .hist-time { min-width: 60px; }
 }
 </style>
@@ -498,8 +500,8 @@ async function fetchD() {
         const tps = [{l:'TP1',p:t.tp1,h:t.tp1Hit},{l:'TP2',p:t.tp2,h:t.tp2Hit},{l:'TP3',p:t.tp3,h:t.tp3Hit}];
         const hc = tps.filter(x => x.h === true).length;
         const th = tps.map(tp => '<div class="tp-item ' + (tp.h ? 'hit' : 'pending') + '"><div class="tp-label">' + tp.l + (tp.h ? ' ✓' : '') + '</div><div class="tp-price">' + (tp.p > 0 ? fmt(tp.p) : '—') + '</div></div>').join('');
-        const pct = (hc / 5) * 100;
-        return '<div class="trade-card ' + d + '"><div class="trade-header"><span class="trade-tf">' + (t.timeframe || '—') + '</span><span class="trade-dir ' + d + '">' + dl(t.direction) + '</span></div><div class="trade-stats"><div class="stat"><div class="stat-label">Entry</div><div class="stat-value entry">$' + fmt(t.entry) + '</div></div><div class="stat"><div class="stat-label">Stop Loss</div><div class="stat-value sl">$' + fmt(t.sl) + '</div></div><div class="stat"><div class="stat-label">ATR</div><div class="stat-value atr">' + fmt(t.atr) + '</div></div></div><div class="tp-section"><div class="tp-section-title">Take Profit Progress (' + hc + '/5)</div><div class="tp-grid">' + th + '</div></div><div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div><div class="trade-cycle"><span>Cycle</span><span class="cycle-badge">#' + (t.cycle || '—') + '</span></div></div>';
+        const pct = (hc / 3) * 100;
+        return '<div class="trade-card ' + d + '"><div class="trade-header"><span class="trade-tf">' + (t.timeframe || '—') + '</span><span class="trade-dir ' + d + '">' + dl(t.direction) + '</span></div><div class="trade-stats"><div class="stat"><div class="stat-label">Entry</div><div class="stat-value entry">$' + fmt(t.entry) + '</div></div><div class="stat"><div class="stat-label">Stop Loss</div><div class="stat-value sl">$' + fmt(t.sl) + '</div></div><div class="stat"><div class="stat-label">ATR</div><div class="stat-value atr">' + fmt(t.atr) + '</div></div></div><div class="tp-section"><div class="tp-section-title">Take Profit Progress (' + hc + '/3)</div><div class="tp-grid">' + th + '</div></div><div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div><div class="trade-cycle"><span>Cycle</span><span class="cycle-badge">#' + (t.cycle || '—') + '</span></div></div>';
       }).join('');
     }
 
