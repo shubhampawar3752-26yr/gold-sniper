@@ -320,6 +320,27 @@ const HIGH_IMPACT_INDICATORS = [
   'Durable Goods Orders', 'Housing Starts', 'Unemployment Rate'
 ];
 
+// ── Streak Circuit Breaker ──
+// After MAX_CONSECUTIVE_LOSSES in a row on a single TF, auto-pause it for COOLDOWN_MS
+// Prevents cascading losses when market conditions are adversarial for that TF
+const MAX_CONSECUTIVE_LOSSES = 3;
+const STREAK_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour pause
+
+function isStreakPaused(l: string, states: any): { paused: boolean; losses: number; remainingMs: number } {
+  const s = states[l] || {};
+  const streak = s.__lossStreak || 0;
+  if (streak < MAX_CONSECUTIVE_LOSSES) return { paused: false, losses: streak, remainingMs: 0 };
+  const pauseTime = s.__streakPauseTime ? new Date(s.__streakPauseTime).getTime() : 0;
+  const elapsed = Date.now() - pauseTime;
+  if (elapsed >= STREAK_COOLDOWN_MS) {
+    // Cooldown over — reset streak
+    s.__lossStreak = 0;
+    s.__streakPauseTime = null;
+    return { paused: false, losses: 0, remainingMs: 0 };
+  }
+  return { paused: true, losses: streak, remainingMs: STREAK_COOLDOWN_MS - elapsed };
+}
+
 async function fetchNewsBlackout(): Promise<{ blackout: boolean; event: string; minutes: number | null }> {
   const FINNHUB_KEY = Deno.env.get('FINNHUB_API_KEY') || '';
   if (!FINNHUB_KEY) return { blackout: false, event: '', minutes: null };
@@ -1045,6 +1066,12 @@ Deno.serve(async (req) => {
         console.log(`[${l}] First run — low confluence: ${confluenceFirst.score}/${TFS.length} (need ${MIN_CONFLUENCE[l]||2}) aligned=${confluenceFirst.aligned.join(',')} against=${confluenceFirst.against.join(',')}`);
       }
 
+      // Streak circuit breaker
+      const streakFirst = isStreakPaused(l, states);
+      if (streakFirst.paused) {
+        console.log(`[${l}] First run — STREAK PAUSED: ${streakFirst.losses} losses, ${Math.round(streakFirst.remainingMs/60000)}min left`);
+      }
+
       // Session filter: skip new entries in Asian session for lower TFs
       if (newsStatus.blackout) {
         console.log(`[${l}] First run — NEWS BLACKOUT: ${newsStatus.event}`);
@@ -1056,6 +1083,8 @@ Deno.serve(async (req) => {
         console.log(`[${l}] First run — skipping DXY counter-trend entry`);
       } else if (!confluenceOKFirst) {
         console.log(`[${l}] First run — skipping low confluence entry`);
+      } else if (streakFirst.paused) {
+        console.log(`[${l}] First run — skipping (streak cooldown ${Math.round(streakFirst.remainingMs/60000)}min left)`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
@@ -1120,8 +1149,16 @@ Deno.serve(async (req) => {
         console.log(`[${l}] All TPs — low confluence: ${confluenceAllTP.score}/${TFS.length} aligned=${confluenceAllTP.aligned.join(',')}`);
       }
 
+      // Streak circuit breaker
+      const streakAllTP = isStreakPaused(l, states);
+      if (streakAllTP.paused) {
+        console.log(`[${l}] All TPs — STREAK PAUSED: ${streakAllTP.losses} losses, ${Math.round(streakAllTP.remainingMs/60000)}min left`);
+      }
+
       if (newsStatus.blackout) {
         console.log(`[${l}] All TPs — NEWS BLACKOUT: ${newsStatus.event}`);
+      } else if (streakAllTP.paused) {
+        console.log(`[${l}] All TPs — skipping (streak cooldown ${Math.round(streakAllTP.remainingMs/60000)}min left)`);
       } else if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP && confluenceOKAllTP) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
@@ -1216,6 +1253,12 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Streak circuit breaker
+      const streakSL = isStreakPaused(l, states);
+      if (streakSL.paused) {
+        console.log(`[${l}] SL/flip — STREAK PAUSED: ${streakSL.losses} losses, ${Math.round(streakSL.remainingMs/60000)}min left`);
+      }
+
       // Multi-TF confluence for SL/flip re-entry
       const confluenceSL = computeConfluence(tvData, currentLong ? 'long' : 'short');
       const confluenceOKSL = confluenceSL.score >= (MIN_CONFLUENCE[l] || 2);
@@ -1223,7 +1266,7 @@ Deno.serve(async (req) => {
         console.log(`[${l}] SL/flip — low confluence: ${confluenceSL.score}/${TFS.length} aligned=${confluenceSL.aligned.join(',')}`);
       }
 
-      const shouldEnter = !newsStatus.blackout && !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL && confluenceOKSL;
+      const shouldEnter = !newsStatus.blackout && !streakSL.paused && !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL && confluenceOKSL;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
@@ -1329,6 +1372,18 @@ Deno.serve(async (req) => {
       }
       
       await recordTradeHistory(s, l, exitPrice, exitReason);
+
+      // ── Streak circuit breaker tracking ──
+      const isWin = exitReason === 'all_tps_hit' || exitReason === 'tp1_locked' || exitReason === 'tp2_locked' || exitReason === 'tp3_locked';
+      if (isWin) {
+        s.__lossStreak = 0; // Reset on win
+      } else {
+        s.__lossStreak = (s.__lossStreak || 0) + 1;
+        if (s.__lossStreak >= MAX_CONSECUTIVE_LOSSES) {
+          s.__streakPauseTime = new Date().toISOString();
+          console.log(`[${l}] ⛔ STREAK CIRCUIT BREAKER: ${s.__lossStreak} consecutive losses — pausing for ${STREAK_COOLDOWN_MS/60000}min`);
+        }
+      }
     }
   }
 
@@ -1410,6 +1465,11 @@ Deno.serve(async (req) => {
       bullish: computeConfluence(tvData, 'long'),
       bearish: computeConfluence(tvData, 'short'),
     },
+    streaks: TFS.map(tf => {
+      const s = states[tf.l] || {};
+      const st = isStreakPaused(tf.l, states);
+      return { tf: tf.l, losses: s.__lossStreak || 0, paused: st.paused, remainingMin: Math.round(st.remainingMs / 60000) };
+    }),
     alerts: alerts.length,
     alertsSent,
     alertDetails,
