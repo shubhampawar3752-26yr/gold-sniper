@@ -281,6 +281,91 @@ async function fetchDXYIndicators(): Promise<{ dxyBullish: boolean | null; dxy1h
   }
 }
 
+// ── Multi-Timeframe Confluence Score ──
+// Counts how many TFs agree with the signal direction (bullish/bearish)
+// Score 0-6: 0 = no agreement, 6 = all TFs aligned
+// Minimum score required for entry (configurable per TF)
+const MIN_CONFLUENCE: Record<string, number> = {
+  '1M': 3,   // Need 3+ TFs aligned (half of 6)
+  '5M': 3,   // Need 3+ TFs aligned
+  '15M': 2,  // Need 2+ TFs aligned (less strict for higher TFs)
+  '30M': 2,
+  '1H': 2,
+  '4H': 2,
+};
+
+function computeConfluence(tvData: Record<string, any>, signalDir: 'long' | 'short'): { score: number; aligned: string[]; against: string[] } {
+  const aligned: string[] = [];
+  const against: string[] = [];
+  for (const tf of TFS) {
+    const e9 = parseFloat(tvData[`EMA9|${tf.tv}`]);
+    const e21 = parseFloat(tvData[`EMA21|${tf.tv}`]);
+    if (isNaN(e9) || isNaN(e21)) continue;
+    const tfBullish = e9 > e21;
+    const agrees = (signalDir === 'long' && tfBullish) || (signalDir === 'short' && !tfBullish);
+    if (agrees) aligned.push(tf.l);
+    else against.push(tf.l);
+  }
+  return { score: aligned.length, aligned, against };
+}
+
+// ── News Event Blackout ──
+// Blocks new entries within ±30 min of high-impact US economic events
+// Uses Finnhub economic calendar API
+const NEWS_BLACKOUT_MINUTES = 30; // ±30 min around event
+const HIGH_IMPACT_INDICATORS = [
+  'CPI', 'Core CPI', 'Initial Jobless Claims', 'Non Farm Payroll', 'Core PCE',
+  'FOMC', 'Fed Rate Decision', 'GDP', 'PPI', 'Retail Sales',
+  'ISM Manufacturing PMI', 'ISM Services PMI', 'Consumer Confidence',
+  'Durable Goods Orders', 'Housing Starts', 'Unemployment Rate'
+];
+
+async function fetchNewsBlackout(): Promise<{ blackout: boolean; event: string; minutes: number | null }> {
+  const FINNHUB_KEY = Deno.env.get('FINNHUB_API_KEY') || '';
+  if (!FINNHUB_KEY) return { blackout: false, event: '', minutes: null };
+
+  try {
+    const now = new Date();
+    const from = new Date(now.getTime() - 60 * 60 * 1000).toISOString().split('T')[0];
+    const to = new Date(now.getTime() + 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const url = `https://finnhub.io/api/v1/calendar/economic?from=${from}&to=${to}&token=${FINNHUB_KEY}`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) throw new Error(`Finnhub HTTP ${r.status}`);
+    const data = await r.json();
+
+    const events = data?.economicCalendar || data?.events || [];
+    if (!Array.isArray(events) || events.length === 0) {
+      return { blackout: false, event: '', minutes: null };
+    }
+
+    // Check each event for high impact within the blackout window
+    for (const ev of events) {
+      const name = ev?.name || ev?.event || ev?.indicator || '';
+      const impact = ev?.impact || ev?.country || '';
+      const country = ev?.country || ev?.actual?.country || 'US';
+      // Only check US events
+      if (country !== 'US' && country !== 'United States') continue;
+
+      const isHighImpact = HIGH_IMPACT_INDICATORS.some(h => name.toLowerCase().includes(h.toLowerCase()));
+      if (!isHighImpact) continue;
+
+      const evTime = ev?.time ? new Date(`${from}T${ev.time}Z`) : null;
+      if (!evTime) continue;
+
+      const diffMin = (evTime.getTime() - now.getTime()) / 60000;
+      if (Math.abs(diffMin) <= NEWS_BLACKOUT_MINUTES) {
+        console.log(`NEWS BLACKOUT: ${name} at ${ev.time} UTC (${diffMin > 0 ? 'in' : 'was'} ${Math.abs(diffMin).toFixed(0)} min)`);
+        return { blackout: true, event: name, minutes: Math.round(diffMin) };
+      }
+    }
+    return { blackout: false, event: '', minutes: null };
+  } catch (e) {
+    console.error(`News blackout check failed: ${(e as Error).message}`);
+    return { blackout: false, event: '', minutes: null };
+  }
+}
+
 async function fetchLivePrice(): Promise<number | null> {
   // Source 1: TwelveData API
   try {
@@ -784,6 +869,17 @@ Deno.serve(async (req) => {
     errors.push(`DXY fetch: ${(e as Error).message}`);
   }
 
+  // ── Fetch news blackout status ──
+  let newsStatus: { blackout: boolean; event: string; minutes: number | null } = { blackout: false, event: '', minutes: null };
+  try {
+    newsStatus = await fetchNewsBlackout();
+    if (newsStatus.blackout) {
+      console.log(`⚠️ NEWS BLACKOUT ACTIVE: ${newsStatus.event} (${newsStatus.minutes} min) — no new entries`);
+    }
+  } catch (e) {
+    errors.push(`News check: ${(e as Error).message}`);
+  }
+
   // ── Fetch AI Candle Scanner analysis ──
   try {
     aiAnalysis = await fetchAIAnalysis();
@@ -942,13 +1038,24 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Multi-TF confluence: require minimum aligned TFs
+      const confluenceFirst = computeConfluence(tvData, dir);
+      const confluenceOKFirst = confluenceFirst.score >= (MIN_CONFLUENCE[l] || 2);
+      if (!confluenceOKFirst) {
+        console.log(`[${l}] First run — low confluence: ${confluenceFirst.score}/${TFS.length} (need ${MIN_CONFLUENCE[l]||2}) aligned=${confluenceFirst.aligned.join(',')} against=${confluenceFirst.against.join(',')}`);
+      }
+
       // Session filter: skip new entries in Asian session for lower TFs
-      if (!isSessionActive(l, new Date())) {
+      if (newsStatus.blackout) {
+        console.log(`[${l}] First run — NEWS BLACKOUT: ${newsStatus.event}`);
+      } else if (!isSessionActive(l, new Date())) {
         console.log(`[${l}] Skipping entry — outside active session (Asian chop filter)`);
       } else if (!trendAlignedFirst) {
         console.log(`[1M] First run — skipping counter-trend entry`);
       } else if (!dxyConfirmedFirst) {
         console.log(`[${l}] First run — skipping DXY counter-trend entry`);
+      } else if (!confluenceOKFirst) {
+        console.log(`[${l}] First run — skipping low confluence entry`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
@@ -1005,7 +1112,17 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP) {
+      // Multi-TF confluence for All TPs re-entry
+      const dirAllTP = ema9 > ema21 ? 'long' : 'short';
+      const confluenceAllTP = computeConfluence(tvData, dirAllTP);
+      const confluenceOKAllTP = confluenceAllTP.score >= (MIN_CONFLUENCE[l] || 2);
+      if (!confluenceOKAllTP) {
+        console.log(`[${l}] All TPs — low confluence: ${confluenceAllTP.score}/${TFS.length} aligned=${confluenceAllTP.aligned.join(',')}`);
+      }
+
+      if (newsStatus.blackout) {
+        console.log(`[${l}] All TPs — NEWS BLACKOUT: ${newsStatus.event}`);
+      } else if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP && confluenceOKAllTP) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
 
@@ -1099,7 +1216,14 @@ Deno.serve(async (req) => {
         }
       }
 
-      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL;
+      // Multi-TF confluence for SL/flip re-entry
+      const confluenceSL = computeConfluence(tvData, currentLong ? 'long' : 'short');
+      const confluenceOKSL = confluenceSL.score >= (MIN_CONFLUENCE[l] || 2);
+      if (!confluenceOKSL) {
+        console.log(`[${l}] SL/flip — low confluence: ${confluenceSL.score}/${TFS.length} aligned=${confluenceSL.aligned.join(',')}`);
+      }
+
+      const shouldEnter = !newsStatus.blackout && !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL && confluenceOKSL;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
@@ -1281,6 +1405,11 @@ Deno.serve(async (req) => {
       ema1h: dxyData.dxy1h,
       ema4h: dxyData.dxy4h
     } : null,
+    news: newsStatus.blackout ? { blackout: true, event: newsStatus.event, minutes: newsStatus.minutes } : { blackout: false },
+    confluence: {
+      bullish: computeConfluence(tvData, 'long'),
+      bearish: computeConfluence(tvData, 'short'),
+    },
     alerts: alerts.length,
     alertsSent,
     alertDetails,
