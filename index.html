@@ -184,6 +184,24 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 
 /* Streak Tracker */
 .streak-panel { background: linear-gradient(135deg, var(--card), #12121a); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+
+/* Market Context Panel */
+.market-context { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-top: 16px; }
+.ctx-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px; transition: all 0.3s; }
+.ctx-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); }
+.ctx-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 6px; }
+.ctx-value { font-size: 18px; font-weight: 800; color: #fff; }
+.ctx-detail { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.ctx-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px; margin-top: 4px; }
+.ctx-badge.bullish { background: rgba(0,200,100,0.15); color: #00c864; border: 1px solid rgba(0,200,100,0.3); }
+.ctx-badge.bearish { background: rgba(255,68,68,0.15); color: #ff4444; border: 1px solid rgba(255,68,68,0.3); }
+.ctx-badge.neutral { background: rgba(255,200,0,0.15); color: #ffc800; border: 1px solid rgba(255,200,0,0.3); }
+.ctx-badge.blackout { background: rgba(255,68,68,0.15); color: #ff4444; border: 1px solid rgba(255,68,68,0.3); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+.confluence-bar { width: 100%; height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+.confluence-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+.confluence-fill.bull { background: linear-gradient(90deg, #00c864, #00ff80); }
+.confluence-fill.bear { background: linear-gradient(90deg, #ff4444, #ff6b6b); }
 .streak-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin-top: 16px; }
 .streak-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 14px; text-align: center; transition: all 0.3s; }
 .streak-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.15); }
@@ -298,6 +316,17 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
   <div class="streak-panel">
     <div class="section-title"><h2>Win/Loss Streaks</h2><span class="trade-count" id="streakStatus" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.1);color:#aaa">Loading...</span></div>
     <div class="streak-grid" id="streakGrid"><div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;grid-column:1/-1">Calculating streaks...</div></div>
+  </div>
+
+  <!-- Market Context -->
+  <div class="streak-panel">
+    <div class="section-title"><h2>Market Context</h2><span class="trade-count" id="ctxStatus" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.1);color:#aaa">Loading...</span></div>
+    <div class="market-context" id="marketContext">
+      <div class="ctx-card"><div class="ctx-label">DXY Trend</div><div class="ctx-value" id="dxyTrend">—</div><div class="ctx-detail" id="dxyDetail">Loading...</div></div>
+      <div class="ctx-card"><div class="ctx-label">Confluence (Bull)</div><div class="ctx-value" id="bullConf">—</div><div class="confluence-bar"><div class="confluence-fill bull" id="bullBar" style="width:0%"></div></div><div class="ctx-detail" id="bullTFs">—</div></div>
+      <div class="ctx-card"><div class="ctx-label">Confluence (Bear)</div><div class="ctx-value" id="bearConf">—</div><div class="confluence-bar"><div class="confluence-fill bear" id="bearBar" style="width:0%"></div></div><div class="ctx-detail" id="bearTFs">—</div></div>
+      <div class="ctx-card"><div class="ctx-label">News Blackout</div><div class="ctx-value" id="newsStatus">—</div><div class="ctx-detail" id="newsDetail">Checking...</div></div>
+    </div>
   </div>
 
   <!-- Signal Engine -->
@@ -476,6 +505,49 @@ async function fetchD() {
 
     // Trade History
     renderHistory(data.tradeHistory || []);
+
+    // Market Context
+    const dxy = data.dxy, conf = data.confluence, news = data.news, streaks = data.streaks || [];
+    const dxyEl = document.getElementById('dxyTrend'), dxyD = document.getElementById('dxyDetail');
+    if (dxy) {
+      const isBull = dxy.trend === 'bullish';
+      dxyEl.innerHTML = (isBull ? '🟢 BULLISH' : '🔴 BEARISH');
+      dxyEl.style.color = isBull ? '#00c864' : '#ff4444';
+      dxyD.textContent = 'DXY ' + (dxy.price ? '$' + dxy.price.toFixed(2) : '') + ' · 1H: ' + (dxy.ema1h ? (dxy.ema1h.bullish ? '↑' : '↓') : '?') + ' 4H: ' + (dxy.ema4h && dxy.ema4h.bullish !== null ? (dxy.ema4h.bullish ? '↑' : '↓') : '?');
+    } else { dxyEl.textContent = 'N/A'; dxyD.textContent = 'DXY data unavailable'; }
+
+    if (conf) {
+      const bull = conf.bullish || {}, bear = conf.bearish || {};
+      const bs = bull.score || 0, bsc = bear.score || 0;
+      document.getElementById('bullConf').textContent = bs + '/6';
+      document.getElementById('bullBar').style.width = (bs/6*100) + '%';
+      document.getElementById('bullTFs').textContent = (bull.aligned || []).join(' · ') || 'None';
+      document.getElementById('bearConf').textContent = bsc + '/6';
+      document.getElementById('bearBar').style.width = (bsc/6*100) + '%';
+      document.getElementById('bearTFs').textContent = (bear.aligned || []).join(' · ') || 'None';
+    }
+
+    const ns = document.getElementById('newsStatus'), nd = document.getElementById('newsDetail');
+    if (news && news.blackout) {
+      ns.innerHTML = '<span class="ctx-badge blackout">⚠ BLACKOUT</span>';
+      nd.textContent = news.event + (news.minutes != null ? ' (' + (news.minutes > 0 ? 'in ' : '') + Math.abs(news.minutes) + 'min' + (news.minutes < 0 ? ' ago' : '') + ')' : '');
+    } else {
+      ns.innerHTML = '<span class="ctx-badge bullish">CLEAR</span>';
+      nd.textContent = 'No high-impact events';
+    }
+
+    // Streak circuit breaker status
+    if (streaks && streaks.length > 0) {
+      const paused = streaks.filter(s => s.losses >= 3);
+      const ctxS = document.getElementById('ctxStatus');
+      if (paused.length > 0) {
+        ctxS.textContent = '⚠ ' + paused.length + ' TF paused';
+        ctxS.style.color = '#ff4444';
+      } else {
+        ctxS.textContent = 'All active';
+        ctxS.style.color = '#00c864';
+      }
+    }
 
   } catch (err) {
     setOnline(false);

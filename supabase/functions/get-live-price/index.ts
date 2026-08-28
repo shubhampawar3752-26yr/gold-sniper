@@ -208,5 +208,13 @@ Deno.serve(async (req) => {
     marketState: 'open', marketTime: Math.floor(Date.now() / 1000), priceSource: live.source,
     fetchMs, lastMonitorRun: lastRun, lastTick, activeTrades, activeCount: activeTrades.length,
     allTimeframes, overallSignal, longCount, shortCount, tradeHistory, stats,
+    // Market context from engine
+    dxy: states?.__dxy || null,
+    confluence: states?.__confluence || null,
+    news: states?.__news || null,
+    streaks: TFS.map(tf => {
+      const s = states?.[tf] || {};
+      return { tf, losses: s.__lossStreak || 0, pausedUntil: s.__streakPauseTime || null };
+    }),
   }), { status: 200, headers });
 });
