@@ -25,7 +25,7 @@ const TF_SL_MULT: Record<string, number> = {
   '15M': 2, '30M': 2, '1H': 2, '4H': 2,          // unchanged
 };
 const TF_RR: Record<string, number[]> = {
-  '1M':  [0.75, 1.5, 2.5],   // TP1=1.5xATR TP2=3xATR TP3=5xATR (easier TP1)
+  '1M':  [0.5, 1.5, 2.5],    // TP1=1.0xATR (very close, high hit rate) TP2=3xATR TP3=5xATR
   '5M':  [0.75, 1.5, 2.5],   // same
   '15M': [1, 2, 3],           // unchanged
   '30M': [1, 2, 3],
@@ -35,7 +35,7 @@ const TF_RR: Record<string, number[]> = {
 
 // ── Min ATR filter: skip trades when volatility too low ──
 const MIN_ATR: Record<string, number> = {
-  '1M': 1.5,    // below 1.5 ATR = too tight, noise will hit SL
+  '1M': 2.0,    // below 2.0 ATR = too tight, noise will hit SL (raised for quality)
   '5M': 2.0,
   '15M': 0, '30M': 0, '1H': 0, '4H': 0,  // no filter for higher TFs
 };
@@ -869,9 +869,23 @@ Deno.serve(async (req) => {
       const signal = ema9 > ema21 ? 'buy' : 'sell';
       const dir = signal === 'buy' ? 'long' : 'short';
 
+      // 5M trend alignment for 1M (first run)
+      let trendAlignedFirst = true;
+      if (l === '1M') {
+        const tf5m = states['5M'] || {};
+        const ema9_5m = tf5m.prevEma9;
+        const ema21_5m = tf5m.prevEma21;
+        if (ema9_5m != null && ema21_5m != null) {
+          const trend5mLong = ema9_5m > ema21_5m;
+          trendAlignedFirst = (dir === 'long' && trend5mLong) || (dir === 'short' && !trend5mLong);
+        }
+      }
+
       // Session filter: skip new entries in Asian session for lower TFs
       if (!isSessionActive(l, new Date())) {
         console.log(`[${l}] Skipping entry — outside active session (Asian chop filter)`);
+      } else if (!trendAlignedFirst) {
+        console.log(`[1M] First run — skipping counter-trend entry`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
@@ -900,8 +914,25 @@ Deno.serve(async (req) => {
       const minSpread = atr * (MIN_EMA_SPREAD_ATR_PCT[l] || 0.10);
       const spreadOK = emaSpread >= minSpread;
 
-      const rsiNeutralAllTP = rsi != null && rsi >= 40 && rsi <= 60;
-      if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP) {
+      const rsiNeutralAllTP = (l === '1M' || l === '5M') && rsi != null && rsi >= 40 && rsi <= 60;
+
+      // 5M trend alignment for 1M
+      let trendAlignedAllTP = true;
+      if (l === '1M') {
+        const tf5m = states['5M'] || {};
+        const ema9_5m = tf5m.prevEma9;
+        const ema21_5m = tf5m.prevEma21;
+        if (ema9_5m != null && ema21_5m != null) {
+          const trend5mLong = ema9_5m > ema21_5m;
+          const dirLong = ema9 > ema21;
+          trendAlignedAllTP = (dirLong && trend5mLong) || (!dirLong && !trend5mLong);
+          if (!trendAlignedAllTP) {
+            console.log(`[1M] All TPs — skipping counter-trend entry`);
+          }
+        }
+      }
+
+      if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
 
@@ -968,7 +999,25 @@ Deno.serve(async (req) => {
       // RSI filter: only for 1M/5M (choppy market prevention)
       // Higher TFs should re-enter regardless of RSI — RSI 40-60 is normal in trends
       const rsiNeutral = (l === '1M' || l === '5M') && rsi != null && rsi >= 40 && rsi <= 60;
-      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL;
+
+      // 5M trend alignment for 1M: only take 1M signals that agree with 5M EMA direction
+      // This filters out counter-trend 1M noise — the #1 cause of 1M losses
+      let trendAligned = true;
+      if (l === '1M') {
+        const tf5m = states['5M'] || {};
+        const ema9_5m = tf5m.prevEma9;
+        const ema21_5m = tf5m.prevEma21;
+        if (ema9_5m != null && ema21_5m != null) {
+          const trend5mLong = ema9_5m > ema21_5m;
+          // 1M signal must match 5M trend direction
+          trendAligned = (currentLong && trend5mLong) || (!currentLong && !trend5mLong);
+          if (!trendAligned) {
+            console.log(`[1M] Skipping entry — counter-trend (1M=${currentLong ? 'long' : 'short'}, 5M=${trend5mLong ? 'long' : 'short'})`);
+          }
+        }
+      }
+
+      const shouldEnter = !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned;
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
