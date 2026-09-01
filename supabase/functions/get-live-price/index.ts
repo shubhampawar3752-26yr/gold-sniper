@@ -138,6 +138,7 @@ async function fetchLivePrice() {
 Deno.serve(async (req) => {
   const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+  try {
 
   const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
   const t0 = Date.now();
@@ -185,13 +186,13 @@ Deno.serve(async (req) => {
   if (states) {
     for (const tf of TF_ORDER) {
       const s = states[tf];
-      if (!s) { allTimeframes.push({ timeframe: tf, direction: null, status: 'waiting', entry: 0, sl: 0, cycle: 0, tpProgress: 0, tpHits: [false, false, false, false, false] }); continue; }
-      const tpHits = [s.tp1Hit, s.tp2Hit, s.tp3Hit, s.tp4Hit, s.tp5Hit];
+      if (!s) { allTimeframes.push({ timeframe: tf, direction: null, status: 'waiting', entry: 0, sl: 0, cycle: 0, tpProgress: 0, tpHits: [false, false, false] }); continue; }
+      const tpHits = [s.tp1Hit, s.tp2Hit, s.tp3Hit];
       const tpCount = tpHits.filter(Boolean).length;
       let status = 'waiting';
       if (s.allDone) status = 'complete'; else if (s.slHit) status = "waiting"; else if (s.entry > 0) status = 'active';
-      allTimeframes.push({ timeframe: tf, direction: s.dir || null, status, entry: s.entry || 0, sl: s.sl || 0, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit, tpProgress: tpCount, tpHits, cycle: s.cycle || 0, atr: s.atr || 0 });
-      if (s && s.entry > 0 && !s.slHit && !s.allDone) activeTrades.push({ timeframe: tf, direction: s.dir, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit, cycle: s.cycle, atr: s.atr });
+      allTimeframes.push({ timeframe: tf, direction: s.dir || null, status, entry: s.entry || 0, sl: s.sl || 0, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tpProgress: tpCount, tpHits, cycle: s.cycle || 0, atr: s.atr || 0 });
+      if (s && s.entry > 0 && !s.slHit && !s.allDone) activeTrades.push({ timeframe: tf, direction: s.dir, entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, cycle: s.cycle, atr: s.atr });
     }
   }
 
@@ -212,9 +213,13 @@ Deno.serve(async (req) => {
     dxy: states?.__dxy || null,
     confluence: states?.__confluence || null,
     news: states?.__news || null,
-    streaks: TFS.map(tf => {
+    streaks: TF_ORDER.map(tf => {
       const s = states?.[tf] || {};
       return { tf, losses: s.__lossStreak || 0, pausedUntil: s.__streakPauseTime || null };
     }),
   }), { status: 200, headers });
+  } catch (e) {
+    console.error('Fatal:', (e as Error).message);
+    return new Response(JSON.stringify({ success: false, error: (e as Error).message, price: 0, timestamp: new Date().toISOString() }), { status: 500, headers });
+  }
 });
