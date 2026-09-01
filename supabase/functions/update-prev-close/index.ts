@@ -157,16 +157,28 @@ Deno.serve(async (req) => {
     close: close || 0, source, date: today, updated: now
   };
 
-  // ATOMIC UPDATE: only patches __prevClose key, doesn't touch trading states
+  // Update trading_states.states.__prevClose (this is what get_prev_close reads)
   try {
-    await fetch(`${SUPA_URL}/rest/v1/rpc/update_prev_close_atomic`, {
+    const rpcBody = JSON.stringify({ p_data: ohlcData });
+    const wr = await fetch(`${SUPA_URL}/rest/v1/rpc/update_prev_close_atomic`, {
       method: 'POST',
       headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(ohlcData)
+      body: rpcBody
     });
-    console.log('Atomic update done');
+    if (!wr.ok) {
+      const errText = await wr.text();
+      console.error('update_prev_close_atomic failed:', wr.status, errText);
+      // Fallback: update spot_price_cache directly
+      const spcBody = { previous_day_close: prevClose, day_open: open || 0, day_high: high || 0, day_low: low || 0, day_open_date: today, fetched_at: now };
+      await fetch(`${SUPA_URL}/rest/v1/spot_price_cache?id=eq.1`, {
+        method: 'PATCH',
+        headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify(spcBody)
+      });
+    }
+    console.log('prev_close updated in trading_states');
   } catch (e) {
-    console.error('Atomic update failed:', (e as Error).message);
+    console.error('DB update failed:', (e as Error).message);
     return new Response(JSON.stringify({ success: false, error: 'DB write failed' }), { status: 500, headers });
   }
 
