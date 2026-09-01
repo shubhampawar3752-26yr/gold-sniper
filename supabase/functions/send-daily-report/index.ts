@@ -1,7 +1,7 @@
-// ── Gold Sniper: Daily Trade Report — HTML Email + WhatsApp ──
+// ── Gold Sniper: Daily Trade Report — HTML Email ──
 // Timeframe-wise report with entry/SL/TP hit times + entry price + win rate per TF
 // Email: Resend API (styled HTML) → shubhampawar3752@gmail.com
-// WhatsApp: Meta WhatsApp Cloud API → recipients
+// WhatsApp: Meta WhatsApp Cloud API → recipients (optional)
 
 const SUPA_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPA_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -21,6 +21,7 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     if (body?.mode === 'morning') mode = 'morning';
+    if (body?.mode === 'monthly') mode = 'monthly';
   } catch {}
 
   // Fetch alerts
@@ -28,10 +29,15 @@ Deno.serve(async (req) => {
   if (mode === 'morning') {
     const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
     alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=1000`;
-    // Note: tp is a JSONB field with tp1-tp5 + AI info for entry alerts
+  } else if (mode === 'monthly') {
+    // Monthly: first day of current month at 00:00 IST
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const since = monthStart.toISOString();
+    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=5000`;
   } else {
-    alertUrl = `${SUPA_URL}/rest/v1/alerts?created_at=gte.${today}T00:00:00&order=created_at.asc&limit=1000`;
-    // Note: select=* includes tp JSONB field with tp1-tp5 for entry alerts
+    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${today}T00:00:00&order=created_at.asc&limit=1000`;
   }
 
   const r = await fetch(alertUrl, {
@@ -49,7 +55,17 @@ Deno.serve(async (req) => {
   // Fetch trade_history for PnL data
   let tradeHistory: any[] = [];
   try {
-    const since = mode === 'morning' ? new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString() : `${today}T00:00:00+05:30`;
+    let since: string;
+    if (mode === 'morning') {
+      since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    } else if (mode === 'monthly') {
+      const ms = new Date();
+      ms.setDate(1);
+      ms.setHours(0, 0, 0, 0);
+      since = ms.toISOString();
+    } else {
+      since = `${today}T00:00:00+05:30`;
+    }
     const rh = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`, {
       headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
     });
@@ -64,16 +80,6 @@ Deno.serve(async (req) => {
     });
     allTradeHistory = await rah.json();
   } catch (e) { console.error('All trade history fetch failed:', (e as Error).message); }
-
-  // Fetch trade_summary
-  let tradeSummary: any = null;
-  try {
-    const rs = await fetch(`${SUPA_URL}/rest/v1/trade_summary?select=*&order=id.desc&limit=1`, {
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-    });
-    const summaries = await rs.json();
-    tradeSummary = summaries[0] || null;
-  } catch (e) { console.error('Trade summary fetch failed:', (e as Error).message); }
 
   // Fetch trade_stats per timeframe
   let tradeStats: any[] = [];
@@ -91,30 +97,29 @@ Deno.serve(async (req) => {
   const cumLosses = allTradeHistory.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) < 0).length;
   const cumWinRate = allTradeHistory.length > 0 ? Math.round((cumWins / allTradeHistory.length) * 100) : 0;
 
-  // Today's PnL from tradeHistory
-  const todayPips = tradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_pips || 0), 0);
-  const todayPnl = tradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_percent || 0), 0);
-  const todayWins = tradeHistory.filter((t: any) => t.tp1_hit || parseFloat(t.pnl_pips) > 0).length;
-  const todayLosses = tradeHistory.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) < 0).length;
-  const todayWinRate = tradeHistory.length > 0 ? Math.round((todayWins / tradeHistory.length) * 100) : 0;
-  const todayBest = tradeHistory.length > 0 ? Math.max(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
-  const todayWorst = tradeHistory.length > 0 ? Math.min(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
+  // Period PnL from tradeHistory
+  const periodPips = tradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_pips || 0), 0);
+  const periodPnl = tradeHistory.reduce((s: number, t: any) => s + parseFloat(t.pnl_percent || 0), 0);
+  const periodWins = tradeHistory.filter((t: any) => t.tp1_hit || parseFloat(t.pnl_pips) > 0).length;
+  const periodLosses = tradeHistory.filter((t: any) => !t.tp1_hit && parseFloat(t.pnl_pips) < 0).length;
+  const periodWinRate = tradeHistory.length > 0 ? Math.round((periodWins / tradeHistory.length) * 100) : 0;
+  const periodBest = tradeHistory.length > 0 ? Math.max(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
+  const periodWorst = tradeHistory.length > 0 ? Math.min(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
 
   // Fetch ALL entry alerts for time-based entry price lookup
-  // TP/SL alerts don't carry entry/direction/cycle fields, so we match by timeframe + time
   const rEntries = await fetch(
     `${SUPA_URL}/rest/v1/alerts?type=eq.entry&select=id,type,timeframe,direction,entry,sl,tp,cycle,price,created_at&order=created_at.asc&limit=2000`,
     { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
   );
   const allEntryAlerts: any[] = await rEntries.json();
 
-  // Per-TF sorted entry list for time-based lookup
+  // Per-TF sorted entry list
   const tfEntries: Record<string, any[]> = {};
   for (const tf of TFS) {
     tfEntries[tf] = allEntryAlerts.filter(a => a.timeframe === tf);
   }
 
-  // Cycle→entry maps (for alerts that DO have cycle)
+  // Cycle→entry maps
   const cycleEntryMap: Record<string, Record<number, number>> = {};
   const cycleDirMap: Record<string, Record<number, string>> = {};
   const cycleSLMap: Record<string, Record<number, number>> = {};
@@ -137,7 +142,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Find most recent entry for a TF at or before timestamp
   function findEntryByTime(tf: string, timestamp: string): any | null {
     const entries = tfEntries[tf];
     if (!entries || entries.length === 0) return null;
@@ -149,13 +153,12 @@ Deno.serve(async (req) => {
     return result;
   }
 
-  // Match TP/SL to trading state by TP price or SL price
   function getEntryFromState(tf: string, alert: any): number | null {
     const s = state[tf];
     if (!s || !s.entry || s.entry === 0) return null;
     if (alert.tp_price) {
       const tpPrice = Number(alert.tp_price);
-      const stateTPs = [s.tp1, s.tp2, s.tp3, s.tp4, s.tp5].filter(Boolean);
+      const stateTPs = [s.tp1, s.tp2, s.tp3].filter(Boolean);
       for (const stp of stateTPs) {
         if (Math.abs(stp - tpPrice) < 0.5) return Number(s.entry);
       }
@@ -213,36 +216,21 @@ Deno.serve(async (req) => {
     const sls = tfAlerts.filter(a => a.type === 'sl');
     const dones = tfAlerts.filter(a => a.type === 'alldone');
     
-    // Win rate: TP alerts don't have cycle numbers, so we group TPs by which
-    // entry they belong to using time-based lookup. Each unique entry that had
-    // at least 1 TP = 1 win. Each SL = 1 loss.
-    const winningEntries = new Set<string>();
-    for (const tp of tps) {
-      const matched = findEntryByTime(tf, tp.created_at);
-      if (matched) {
-        winningEntries.add(matched.created_at);
-      } else {
-        // No entry found (entry was before our lookup range) — count as unique win by TP time
-        winningEntries.add(tp.created_at);
-      }
-    }
-    const wins = winningEntries.size;
     const losses = sls.length;
-    const winRate = (wins + losses) > 0 ? Math.round((wins / (wins + losses)) * 100) : 0;
-    tfData[tf] = { entries, tps, sls, dones, wins, losses, winRate, cycles: entries.length };
+    const winRate = (entries.length + losses) > 0 ? Math.round((entries.length / (entries.length + losses)) * 100) : 0;
+    tfData[tf] = { entries, tps, sls, dones, wins: entries.length, losses, winRate, cycles: entries.length };
   }
 
-  // Active trades
+  // Active trades — ONLY 3 TPs
   const activeTrades = TFS.map(tf => {
     const s = state[tf];
     if (!s || s.entry === 0 || s.slHit || s.allDone) return null;
-    const tpsHit = [s.tp1Hit, s.tp2Hit, s.tp3Hit, s.tp4Hit, s.tp5Hit].filter(Boolean).length;
-    // Find entry time from alerts
+    const tpsHit = [s.tp1Hit, s.tp2Hit, s.tp3Hit].filter(Boolean).length;
     const entryAlert = alerts.find(a => a.type === 'entry' && a.timeframe === tf && (a.cycle || 0) === (s.cycle || 0));
     const entryTime = entryAlert ? String(entryAlert.created_at).substring(11, 19) : (s.lastRun ? String(s.lastRun).substring(11, 19) : '-');
     return { tf, dir: s.dir, entry: s.entry, sl: s.sl, tpsHit, cycle: s.cycle, rsi: s.rsi, aiRec: s.aiRecommendation,
-      entryTime, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp4: s.tp4, tp5: s.tp5,
-      tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit, tp4Hit: s.tp4Hit, tp5Hit: s.tp5Hit };
+      entryTime, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
+      tp1Hit: s.tp1Hit, tp2Hit: s.tp2Hit, tp3Hit: s.tp3Hit };
   }).filter(Boolean);
 
   // Totals
@@ -255,8 +243,10 @@ Deno.serve(async (req) => {
   const overallWR = (totalWins + totalLosses) > 0 ? Math.round((totalWins / (totalWins + totalLosses)) * 100) : 0;
 
   // ── Build HTML Email ──
-  const title = mode === 'morning' ? '☀️ Morning Report' : '🎯 Daily Report';
-  const period = mode === 'morning' ? 'Overnight (last 12h)' : "Today's Full History";
+  const titleMap: Record<string, string> = { morning: '☀️ Morning Report', evening: '🎯 Daily Report', monthly: '📅 Monthly Report' };
+  const periodMap: Record<string, string> = { morning: 'Overnight (last 12h)', evening: "Today's Full History", monthly: 'Month-to-Date' };
+  const title = titleMap[mode] || titleMap.evening;
+  const period = periodMap[mode] || periodMap.evening;
 
   let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
   body{font-family:'Segoe UI',Arial,sans-serif;background:#0a0a0f;color:#e0e0e0;margin:0;padding:20px}
@@ -284,15 +274,15 @@ Deno.serve(async (req) => {
   </style></head><body>`;
 
   html += `<div class="header"><h1>GOLD SNIPER — ${title}</h1><div class="date">${now} (IST) • ${period}</div></div>`;
-  const pnlColor = todayPips >= 0 ? 'green' : 'red';
+  const pnlColor = periodPips >= 0 ? 'green' : 'red';
   const cumPnlColor = cumPips >= 0 ? 'green' : 'red';
   html += `<div class="stats">
     <div class="stat"><div class="num gold">${tradeHistory.length || totalEntries}</div><div class="label">TRADES</div></div>
-    <div class="stat"><div class="num green">${todayWins}</div><div class="label">WINS</div></div>
-    <div class="stat"><div class="num red">${todayLosses}</div><div class="label">LOSSES</div></div>
-    <div class="stat"><div class="num ${todayWinRate >= 50 ? 'green' : 'red'}">${todayWinRate}%</div><div class="label">WIN RATE</div></div>
-    <div class="stat"><div class="num ${pnlColor}">${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)}</div><div class="label">TODAY PIPS</div></div>
-    <div class="stat"><div class="num ${pnlColor}">${todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)}%</div><div class="label">TODAY PnL%</div></div>
+    <div class="stat"><div class="num green">${periodWins}</div><div class="label">WINS</div></div>
+    <div class="stat"><div class="num red">${periodLosses}</div><div class="label">LOSSES</div></div>
+    <div class="stat"><div class="num ${periodWinRate >= 50 ? 'green' : 'red'}">${periodWinRate}%</div><div class="label">WIN RATE</div></div>
+    <div class="stat"><div class="num ${pnlColor}">${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)}</div><div class="label">PERIOD PIPS</div></div>
+    <div class="stat"><div class="num ${pnlColor}">${periodPnl >= 0 ? '+' : ''}${periodPnl.toFixed(2)}%</div><div class="label">PERIOD PnL%</div></div>
     <div class="stat"><div class="num green">${activeTrades.length}</div><div class="label">ACTIVE</div></div>
   </div>`;
 
@@ -322,9 +312,10 @@ Deno.serve(async (req) => {
   }
   html += `</div>`;
 
-  // Today's trade history with PnL
+  // Period's trade history with PnL
   if (tradeHistory.length > 0) {
-    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">📋 TODAY'S CLOSED TRADES (${tradeHistory.length})</span></div>`;
+    const label = mode === 'monthly' ? 'MONTH' : mode === 'morning' ? 'OVERNIGHT' : "TODAY";
+    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">📋 ${label}'S CLOSED TRADES (${tradeHistory.length})</span></div>`;
     html += `<table><tr><th>ID</th><th>TF</th><th>Dir</th><th>Entry</th><th>Exit</th><th>TP1</th><th>TPs</th><th>Exit Reason</th><th>PnL Pips</th><th>PnL %</th><th>Duration</th></tr>`;
     for (const t of tradeHistory) {
       const dir = t.direction || '';
@@ -334,7 +325,6 @@ Deno.serve(async (req) => {
       const pnlCls = pnl >= 0 ? 'green' : 'red';
       const tp1Hit = t.tp1_hit ? '✅' : '❌';
       const dur = t.duration_minutes || 0;
-      const entryT = t.entry_time ? String(t.entry_time).substring(11, 16) : '-';
       html += `<tr><td>#${t.id}</td><td><b>${t.timeframe}</b></td><td class="${dirCls}">${dir.toUpperCase()}</td><td>$${parseFloat(t.entry_price||0).toFixed(2)}</td><td>$${parseFloat(t.exit_price||0).toFixed(2)}</td><td>${tp1Hit}</td><td>${t.tps_hit||0}/3</td><td style="font-size:11px">${t.exit_reason||'-'}</td><td class="${pnlCls}"><b>${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}</b></td><td class="${pnlCls}">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td><td style="font-size:11px;color:#888">${dur}m</td></tr>`;
     }
     html += `</table></div>`;
@@ -365,73 +355,56 @@ Deno.serve(async (req) => {
       const a = ev.data;
       let icon, eventClass;
       const tpNum = a.tp_num || a.tpNum || '';
-      if (ev.type === 'entry') { icon = '🟢 ENTRY'; eventClass = 'green'; }
-      else if (ev.type === 'tp') { icon = `✅ TP ${tpNum} HIT`; eventClass = 'green'; }
-      else if (ev.type === 'sl') { icon = '🛑 SL HIT'; eventClass = 'red'; }
-      else { icon = '🎉 FULL CYCLE'; eventClass = 'gold'; }
-      
-      const dir = getDir(tf, a);
-      const dirClass = (dir === 'buy' || dir === 'long') ? 'green' : (dir === 'sell' || dir === 'short') ? 'red' : '';
-      const dirText = dir ? dir.toUpperCase() : '-';
-      
-      const entryPrice = getEntry(tf, a);
-      const slPrice = getSL(tf, a);
-      
-      // For entry alerts, show TP1-TP5 levels from the tp JSON field
-      let tpLevels = '-';
+      if (ev.type === 'entry') {
+        icon = '🟢'; eventClass = 'green';
+      } else if (ev.type === 'tp') {
+        icon = '✅'; eventClass = 'green';
+      } else if (ev.type === 'sl') {
+        icon = '🛑'; eventClass = 'red';
+      } else {
+        icon = '🎉'; eventClass = 'gold';
+      }
+      const dir = getDir(tf, a).toUpperCase();
+      const entry = getEntry(tf, a);
+      const sl = getSL(tf, a);
+      let tpLevels = '';
       if (ev.type === 'entry' && a.tp) {
-        const tp = a.tp;
-        const parts = [];
+        const tp = typeof a.tp === 'string' ? JSON.parse(a.tp) : a.tp;
+        const parts: string[] = [];
         if (tp.tp1) parts.push(`TP1:$${Number(tp.tp1).toFixed(2)}`);
         if (tp.tp2) parts.push(`TP2:$${Number(tp.tp2).toFixed(2)}`);
         if (tp.tp3) parts.push(`TP3:$${Number(tp.tp3).toFixed(2)}`);
-        if (tp.tp4) parts.push(`TP4:$${Number(tp.tp4).toFixed(2)}`);
-        if (tp.tp5) parts.push(`TP5:$${Number(tp.tp5).toFixed(2)}`);
-        tpLevels = parts.length > 0 ? `<span style="font-size:11px">${parts.join(' ')}</span>` : '-';
+        tpLevels = parts.join(' · ');
       }
-      html += `<tr class="event-row">
-        <td class="time-col">${ev.time}</td>
-        <td class="${eventClass}"><b>${icon}</b></td>
-        <td class="${dirClass}">${dirText}</td>
-        <td>${entryPrice ? '$' + entryPrice.toFixed(2) : '-'}</td>
-        <td>${slPrice ? '$' + slPrice.toFixed(2) : '-'}</td>
-        <td>${a.tp_num || a.tpNum || '-'}</td>
-        <td>${(a.tp_price || a.tpPrice) ? '$' + Number(a.tp_price || a.tpPrice).toFixed(2) : '-'}</td>
-        <td>${tpLevels}</td>
-        <td>${a.price ? '$' + Number(a.price).toFixed(2) : '-'}</td>
-        <td>#${a.cycle || '-'}</td>
-      </tr>`;
+      html += `<tr class="event-row"><td class="time-col">${ev.time}</td><td class="${eventClass}">${icon} ${ev.type.toUpperCase()}</td><td class="${dir === 'LONG' ? 'green' : 'red'}">${dir}</td><td>${entry ? '$' + entry.toFixed(2) : '-'}</td><td class="red">${sl ? '$' + sl.toFixed(2) : '-'}</td><td>${tpNum || '-'}</td><td>${a.tp_price ? '$' + Number(a.tp_price).toFixed(2) : '-'}</td><td style="font-size:11px;color:#888">${tpLevels}</td><td>$${Number(a.price||0).toFixed(2)}</td><td>#${a.cycle || '-'}</td></tr>`;
     }
-    html += `</table>`;
-html += `</div>`;
-  }
-
-  // Active trades
-  if (activeTrades.length > 0) {
-    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name">🟢 Active Trades</span></div>`;
-    html += `<table><tr><th>TF</th><th>Entry Time</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>TP5</th><th>Hit</th><th>Cycle</th><th>AI</th></tr>`;
-    activeTrades.forEach(t => {
-      const dc = t.dir === 'long' ? 'green' : 'red';
-      const tpCell = (hit, price) => hit
-        ? `<td class="green">✅ $${price ? price.toFixed(2) : '-'}</td>`
-        : `<td style="color:#555">⬜ $${price ? price.toFixed(2) : '-'}</td>`;
-      html += `<tr><td><b>${t.tf}</b></td><td style="color:#888;font-size:11px">${t.entryTime}</td><td class="${dc}">${t.dir.toUpperCase()}</td><td>$${t.entry.toFixed(2)}</td><td>$${t.sl.toFixed(2)}</td>${tpCell(t.tp1Hit, t.tp1)}${tpCell(t.tp2Hit, t.tp2)}${tpCell(t.tp3Hit, t.tp3)}${tpCell(t.tp4Hit, t.tp4)}${tpCell(t.tp5Hit, t.tp5)}<td><b>${t.tpsHit}/5</b></td><td>#${t.cycle}</td><td>${t.aiRec || '-'}</td></tr>`;
-    });
     html += `</table></div>`;
   }
 
-  if (totalEntries === 0 && totalTPs === 0 && totalSLs === 0) {
-    html += `<div class="tf-section" style="text-align:center;color:#666;padding:24px">No trades in this period. System monitoring active 24/7.</div>`;
+  // Active trades section — 3 TPs only
+  if (activeTrades.length > 0) {
+    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">🟢 ACTIVE TRADES (${activeTrades.length})</span></div>`;
+    html += `<table><tr><th>TF</th><th>Entry Time</th><th>Dir</th><th>Entry</th><th>SL</th><th>TP1</th><th>TP2</th><th>TP3</th><th>Hit</th><th>Cycle</th><th>AI</th></tr>`;
+    for (const t of activeTrades) {
+      const dc = t.dir === 'long' ? 'green' : 'red';
+      const tpCell = (hit: any, price: any) => hit
+        ? `<td style="color:#00e676">✅ $${Number(price||0).toFixed(2)}</td>`
+        : `<td style="color:#555">$${Number(price||0).toFixed(2)}</td>`;
+      html += `<tr><td><b>${t.tf}</b></td><td style="color:#888;font-size:11px">${t.entryTime}</td><td class="${dc}">${t.dir.toUpperCase()}</td><td>$${t.entry.toFixed(2)}</td><td>$${t.sl.toFixed(2)}</td>${tpCell(t.tp1Hit, t.tp1)}${tpCell(t.tp2Hit, t.tp2)}${tpCell(t.tp3Hit, t.tp3)}<td><b>${t.tpsHit}/3</b></td><td>#${t.cycle}</td><td>${t.aiRec || '-'}</td></tr>`;
+    }
+    html += `</table></div>`;
   }
 
-  html += `<div class="footer">Gold Sniper Trading System • EMA 9/21 Crossover • ${TFS.join(' / ')} • ${allTradeHistory.length} total trades • ${cumPips >= 0 ? '+' : ''}${cumPips.toFixed(1)} cumulative pips</div>`;
+  html += `<div class="footer">Gold Sniper • EMA 9/21 • ATR SL/TP • ${TFS.join(' / ')} • Report generated ${now} IST</div>`;
   html += `</body></html>`;
 
-  const subject = mode === 'morning'
-    ? `☀️ Gold Sniper Morning — ${today} | ${tradeHistory.length} trades, ${todayWins}W/${todayLosses}L, ${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)} pips | WR ${todayWinRate}%`
-    : `🎯 Gold Sniper Daily — ${today} | ${tradeHistory.length} trades, ${todayWins}W/${todayLosses}L, ${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)} pips | WR ${todayWinRate}%`;
+  // ── Send Email ──
+  const subject = mode === 'monthly'
+    ? `📅 Gold Sniper Monthly — ${today} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`
+    : mode === 'morning'
+    ? `☀️ Gold Sniper Morning — ${today} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`
+    : `🎯 Gold Sniper Daily — ${today} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`;
 
-  // Send Email via Resend (styled HTML, no attachment)
   let emailResult = { success: false, error: 'No RESEND_API_KEY' };
   if (RESEND_KEY) {
     try {
@@ -446,17 +419,17 @@ html += `</div>`;
         })
       });
       const data = await resp.json();
-      emailResult = { success: resp.ok, id: data?.id || null, error: resp.ok ? null : data?.message };
+      emailResult = { success: resp.ok, id: data?.id || null, error: resp.ok ? null : (data?.message || JSON.stringify(data)) };
     } catch (e) {
       emailResult = { success: false, error: String(e) };
     }
   }
 
-  // WhatsApp summary
-  let waMsg = `*GOLD SNIPER — ${mode === 'morning' ? 'MORNING' : 'DAILY'} REPORT*\n${now} (IST)\n\n`;
-  waMsg += `📊 *TODAY: ${tradeHistory.length || totalEntries} trades | ${todayWins}W ${todayLosses}L | WR ${todayWinRate}%*\n`;
-  waMsg += `💰 *Today PnL: ${todayPips >= 0 ? '+' : ''}${todayPips.toFixed(1)} pips (${todayPnl >= 0 ? '+' : ''}${todayPnl.toFixed(2)}%)*\n`;
-  waMsg += `📈 Best: +${todayBest.toFixed(1)} | Worst: ${todayWorst.toFixed(1)} pips\n\n`;
+  // WhatsApp summary (optional — failures logged but don't block email success)
+  let waMsg = `*GOLD SNIPER — ${(mode || 'DAILY').toUpperCase()} REPORT*\n${now} (IST)\n\n`;
+  waMsg += `📊 *PERIOD: ${tradeHistory.length || totalEntries} trades | ${periodWins}W ${periodLosses}L | WR ${periodWinRate}%*\n`;
+  waMsg += `💰 *PnL: ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips (${periodPnl >= 0 ? '+' : ''}${periodPnl.toFixed(2)}%)*\n`;
+  waMsg += `📈 Best: +${periodBest.toFixed(1)} | Worst: ${periodWorst.toFixed(1)} pips\n\n`;
   waMsg += `*ALL-TIME: ${allTradeHistory.length} trades | ${cumWins}W ${cumLosses}L | WR ${cumWinRate}%*\n`;
   waMsg += `*Total PnL: ${cumPips >= 0 ? '+' : ''}${cumPips.toFixed(1)} pips (${cumPnl >= 0 ? '+' : ''}${cumPnl.toFixed(2)}%)*\n\n`;
   for (const tf of TFS) {
@@ -470,7 +443,7 @@ html += `</div>`;
     for (const a of d.tps) {
       const t = String(a.created_at).substring(11, 19);
       const tpN = a.tp_num || a.tpNum || '?';
-      waMsg += `  ✅ ${t} TP ${tpN} HIT $${Number(a.tp_price||0).toFixed(2)} (entry $${getEntry(tf,a)?.toFixed(2)||'?'}) #${a.cycle}\n`;
+      waMsg += `  ✅ ${t} TP${tpN} HIT $${Number(a.tp_price||0).toFixed(2)} (entry $${getEntry(tf,a)?.toFixed(2)||'?'}) #${a.cycle}\n`;
     }
     for (const a of d.sls) {
       const t = String(a.created_at).substring(11, 19);
@@ -481,7 +454,7 @@ html += `</div>`;
   if (activeTrades.length > 0) {
     waMsg += `🟢 *ACTIVE TRADES*\n`;
     activeTrades.forEach(t => {
-      waMsg += `${t.tf} ${t.dir.toUpperCase()} $${t.entry.toFixed(2)} TPs:${t.tpsHit}/5 #${t.cycle}\n`;
+      waMsg += `${t.tf} ${t.dir.toUpperCase()} $${t.entry.toFixed(2)} TPs:${t.tpsHit}/3 #${t.cycle}\n`;
     });
   }
   waMsg += `\n_Gold Sniper • EMA 9/21 • ${TFS.join('/')}_`;
@@ -496,7 +469,7 @@ html += `</div>`;
         body: JSON.stringify({ messaging_product: 'whatsapp', to: phone, type: 'text', text: { body: waMsg } })
       });
       const data = await resp.json();
-      waResults.push({ phone, success: resp.ok });
+      waResults.push({ phone, success: resp.ok, error: resp.ok ? null : (data?.error?.message || 'Unknown') });
     } catch (e) {
       waResults.push({ phone, success: false, error: String(e) });
     }
@@ -507,13 +480,13 @@ html += `</div>`;
     mode, date: today,
     email: emailResult,
     whatsapp: waResults,
-    todayPips: Math.round(todayPips * 100) / 100,
-    todayPnl: Math.round(todayPnl * 100) / 100,
-    todayWinRate,
+    periodPips: Math.round(periodPips * 100) / 100,
+    periodPnl: Math.round(periodPnl * 100) / 100,
+    periodWinRate,
     cumulativePips: Math.round(cumPips * 100) / 100,
     cumulativePnl: Math.round(cumPnl * 100) / 100,
     cumulativeWinRate: cumWinRate,
     totalTrades: allTradeHistory.length,
-    stats: { trades: tradeHistory.length, wins: todayWins, losses: todayLosses, activeTrades: activeTrades.length }
+    stats: { trades: tradeHistory.length, wins: periodWins, losses: periodLosses, activeTrades: activeTrades.length }
   }), { headers: { 'Content-Type': 'application/json' } });
 });

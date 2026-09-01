@@ -1,6 +1,6 @@
 project_id = "schegpkwfwkgfmmpnzic"
 
-[functions.xau-monitor]
+[functions.gold-sniper-engine]
 verify_jwt = false
 
 [functions.get-live-price]
@@ -9,8 +9,14 @@ verify_jwt = false
 [functions.dashboard]
 verify_jwt = false
 
-[functions.send-entry-alert]
+[functions.send-daily-report]
 verify_jwt = false
 
 [functions.backup-to-drive]
+verify_jwt = false
+
+[functions.ai-candle-scanner]
+verify_jwt = false
+
+[functions.update-prev-close]
 verify_jwt = false
