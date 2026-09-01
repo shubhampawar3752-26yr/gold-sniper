@@ -1,13 +1,18 @@
 Deno.serve(async () => {
-  const key = Deno.env.get('ALPHA_VANTAGE_API_KEY') || '';
+  const tdKey = Deno.env.get('TWELVE_DATA_API_KEY') || '';
   
-  // Try XAUUSD (forex) instead of GC=F (futures)
-  const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=XAUUSD&apikey=${key}`);
-  const text = await r.text();
+  // Test TwelveData
+  const r1 = await fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${tdKey}`);
+  const d1 = await r1.json();
+  
+  // Test TwelveData quote (for prev_close)
+  const r2 = await fetch(`https://api.twelvedata.com/quote?symbol=XAU/USD&apikey=${tdKey}`);
+  const d2 = await r2.json();
   
   return new Response(JSON.stringify({
-    symbol: 'XAUUSD',
-    httpStatus: r.status,
-    rawResponse: text.substring(0, 500)
+    tdKeyPrefix: tdKey.substring(0, 6) + '...',
+    tdKeyLength: tdKey.length,
+    price: d1,
+    quote: d2
   }, null, 2), {headers: {'Content-Type': 'application/json'}});
 });

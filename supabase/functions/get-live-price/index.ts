@@ -75,7 +75,18 @@ async function fetchLivePriceOfGoldHTML(): Promise<{ price: number; prevClose: n
   return { price, prevClose, source: 'livepriceofgold' };
 }
 
-// ── FALLBACK 2: TwelveData (price endpoint + parallel quote for prevClose) ──
+
+// ── FALLBACK 2: Gold-API.com (free, no key, no limit) ──
+async function fetchGoldApiCom(): Promise<{ price: number; prevClose: number; source: string }> {
+  const r = await fetch('https://api.gold-api.com/price/XAU', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!r.ok) throw new Error(`gold-api.com HTTP ${r.status}`);
+  const data = await r.json();
+  const price = parseFloat(data?.price);
+  if (isNaN(price) || price <= 0) throw new Error('gold-api.com: invalid price');
+  return { price, prevClose: 0, source: 'gold-api.com' };
+}
+
+// ── FALLBACK 3: TwelveData (price endpoint + parallel quote for prevClose) ──
 async function fetchTwelveData(): Promise<{ price: number; prevClose: number; source: string }> {
   if (!TWELVE_DATA_KEY) throw new Error('twelvedata: no key');
   const [priceResp, quoteResp] = await Promise.all([
@@ -108,7 +119,7 @@ async function fetchGoldAPI(): Promise<{ price: number; prevClose: number; sourc
   return { price, prevClose: parseFloat(data?.prev_close_price) || parseFloat(data?.open_price) || 0, source: 'goldapi' };
 }
 
-// ── FALLBACK 4: Alpha Vantage ──
+// ── FALLBACK 5: Alpha Vantage ──
 async function fetchAlphaVantage(): Promise<{ price: number; prevClose: number; source: string }> {
   if (!ALPHA_VANTAGE_KEY) throw new Error('alphavantage: no key');
   const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=XAUUSD&apikey=${ALPHA_VANTAGE_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -126,9 +137,9 @@ async function fetchLivePrice() {
   catch (e) { console.error('SIO failed:', (e as Error).message); }
 
   try {
-    return await Promise.any([fetchLivePriceOfGoldHTML(), fetchTwelveData(), fetchGoldAPI(), fetchAlphaVantage()]);
+    return await Promise.any([fetchLivePriceOfGoldHTML(), fetchGoldApiCom(), fetchGoldAPI(), fetchAlphaVantage()]);
   } catch {
-    for (const fn of [fetchLivePriceOfGoldHTML, fetchTwelveData, fetchGoldAPI, fetchAlphaVantage]) {
+    for (const fn of [fetchLivePriceOfGoldHTML, fetchGoldApiCom, fetchGoldAPI, fetchAlphaVantage, fetchTwelveData]) {
       try { return await fn(); } catch { /* skip */ }
     }
     return null;

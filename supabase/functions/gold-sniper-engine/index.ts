@@ -388,9 +388,22 @@ async function fetchNewsBlackout(): Promise<{ blackout: boolean; event: string; 
 }
 
 async function fetchLivePrice(): Promise<number | null> {
-  // Source 1: TwelveData API
+  // Source 1: livepriceofgold.com HTML scrape (free, no key, no limit)
   try {
-    const r = await fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${TWELVEDATA_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch('https://livepriceofgold.com/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (r.ok) {
+      const html = await r.text();
+      const m = html.match(/data-price="XAUUSD"[^>]*>([^<]+)/) || html.match(/bold\.\s*price[^>]*>\s*\$?([\d,]+\.\d+)/i) || html.match(/>([\d,]+\.\d{2})</);
+      if (m) {
+        const px = parseFloat(m[1].trim().replace(/,/g, ''));
+        if (px > 0) return px;
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Source 2: gold-api.com (free, no key, no limit)
+  try {
+    const r = await fetch('https://api.gold-api.com/price/XAU', { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (r.ok) {
       const d = await r.json();
       const px = parseFloat(d?.price);
@@ -398,16 +411,13 @@ async function fetchLivePrice(): Promise<number | null> {
     }
   } catch { /* fall through */ }
 
-  // Source 2: livepriceofgold.com HTML scrape
+  // Source 3: TwelveData API (limited 800/day — last resort only)
   try {
-    const r = await fetch('https://livepriceofgold.com/', { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const r = await fetch(`https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${TWELVEDATA_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
     if (r.ok) {
-      const html = await r.text();
-      const m = html.match(/bold\.\s*price[^>]*>\s*\$?([\d,]+\.\d+)/i) || html.match(/>([\d,]+\.\d{2})</);
-      if (m) {
-        const px = parseFloat(m[1].replace(/,/g, ''));
-        if (px > 0) return px;
-      }
+      const d = await r.json();
+      const px = parseFloat(d?.price);
+      if (px > 0) return px;
     }
   } catch { /* fall through */ }
 
