@@ -111,7 +111,7 @@ async function fetchGoldAPI(): Promise<{ price: number; prevClose: number; sourc
 // ── FALLBACK 4: Alpha Vantage ──
 async function fetchAlphaVantage(): Promise<{ price: number; prevClose: number; source: string }> {
   if (!ALPHA_VANTAGE_KEY) throw new Error('alphavantage: no key');
-  const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GC=F&apikey=${ALPHA_VANTAGE_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=XAUUSD&apikey=${ALPHA_VANTAGE_KEY}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
   if (!r.ok) throw new Error(`alphavantage HTTP ${r.status}`);
   const data = await r.json();
   const quote = data?.['Global Quote'] || {};

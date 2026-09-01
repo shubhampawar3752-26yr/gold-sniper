@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
   // ── Source 3: Alpha Vantage ──
   if (prevClose === 0 && ALPHA_KEY) {
     try {
-      const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GC=F&apikey=${ALPHA_KEY}`, {
+      const r = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=XAUUSD&apikey=${ALPHA_KEY}`, {
         headers: { 'User-Agent': 'Mozilla/5.0' }
       });
       if (r.ok) {
