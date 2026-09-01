@@ -30,12 +30,14 @@ Deno.serve(async (req) => {
     const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
     alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=1000`;
   } else if (mode === 'monthly') {
-    // Monthly: first day of current month at 00:00 IST
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const since = monthStart.toISOString();
-    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=5000`;
+    // Monthly: full PREVIOUS month (1st to last day)
+    const prevMonth = new Date();
+    prevMonth.setDate(1);  // 1st of current month
+    prevMonth.setHours(0, 0, 0, 0);
+    const monthEnd = prevMonth.toISOString();  // 1st of current month = end boundary
+    prevMonth.setMonth(prevMonth.getMonth() - 1);  // 1st of previous month
+    const monthStart = prevMonth.toISOString();
+    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${monthStart}&created_at=lt.${monthEnd}&order=created_at.asc&limit=5000`;
   } else {
     alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${today}T00:00:00&order=created_at.asc&limit=1000`;
   }
@@ -55,18 +57,24 @@ Deno.serve(async (req) => {
   // Fetch trade_history for PnL data
   let tradeHistory: any[] = [];
   try {
-    let since: string;
+    let historyUrl: string;
     if (mode === 'morning') {
-      since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      historyUrl = `${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`;
     } else if (mode === 'monthly') {
-      const ms = new Date();
-      ms.setDate(1);
-      ms.setHours(0, 0, 0, 0);
-      since = ms.toISOString();
+      // Full previous month: 1st to last day
+      const pm = new Date();
+      pm.setDate(1);
+      pm.setHours(0, 0, 0, 0);
+      const monthEnd = pm.toISOString();  // 1st of current month (exclusive upper bound)
+      pm.setMonth(pm.getMonth() - 1);
+      const monthStart = pm.toISOString();  // 1st of previous month
+      historyUrl = `${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${monthStart}&created_at=lt.${monthEnd}&order=id.asc`;
     } else {
-      since = `${today}T00:00:00+05:30`;
+      const since = `${today}T00:00:00+05:30`;
+      historyUrl = `${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`;
     }
-    const rh = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`, {
+    const rh = await fetch(historyUrl, {
       headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
     });
     tradeHistory = await rh.json();
@@ -244,7 +252,7 @@ Deno.serve(async (req) => {
 
   // ── Build HTML Email ──
   const titleMap: Record<string, string> = { morning: '☀️ Morning Report', evening: '🎯 Daily Report', monthly: '📅 Monthly Report' };
-  const periodMap: Record<string, string> = { morning: 'Overnight (last 12h)', evening: "Today's Full History", monthly: 'Month-to-Date' };
+  const periodMap: Record<string, string> = { morning: 'Overnight (last 12h)', evening: "Today's Full History", monthly: 'Previous Month (1st to 31st)' };
   const title = titleMap[mode] || titleMap.evening;
   const period = periodMap[mode] || periodMap.evening;
 
@@ -399,8 +407,13 @@ Deno.serve(async (req) => {
   html += `</body></html>`;
 
   // ── Send Email ──
+  const prevMonthLabel = new Date();
+  prevMonthLabel.setDate(1);
+  prevMonthLabel.setMonth(prevMonthLabel.getMonth() - 1);
+  const monthLabel = prevMonthLabel.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
   const subject = mode === 'monthly'
-    ? `📅 Gold Sniper Monthly — ${today} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`
+    ? `📅 Gold Sniper Monthly — ${monthLabel} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`
     : mode === 'morning'
     ? `☀️ Gold Sniper Morning — ${today} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`
     : `🎯 Gold Sniper Daily — ${today} | ${tradeHistory.length} trades, ${periodWins}W/${periodLosses}L, ${periodPips >= 0 ? '+' : ''}${periodPips.toFixed(1)} pips | WR ${periodWinRate}%`;
