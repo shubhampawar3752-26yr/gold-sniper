@@ -21,11 +21,11 @@ const RR = [1, 2, 3];           // TP1=1R(2xATR) TP2=2R(4xATR) TP3=3R(6xATR) (de
 // Problem: 1M WR=33%, 5M WR=40% — TP1=SL distance means noise hits SL first
 // Fix: TP1 closer (1.5xATR), SL wider (2.5xATR) → TP1 is 0.6x SL distance
 const TF_SL_MULT: Record<string, number> = {
-  '1M': 2.0, '5M': 2.5,                          // 1M tighter SL = less risk + easier TP1
+  '1M': 2.5, '5M': 2.5,                          // 1M raised 2.0→2.5 (2026-09-26): 85 SL hits = -504 pips, noise was reaching 2xATR
   '15M': 2, '30M': 2, '1H': 2, '4H': 2,          // unchanged
 };
 const TF_RR: Record<string, number[]> = {
-  '1M':  [0.5, 1.5, 2.5],    // TP1=1.0xATR (very close, high hit rate) TP2=3xATR TP3=5xATR
+  '1M':  [0.4, 1.2, 2.0],    // rescaled for SL=2.5: TP1=1.0xATR TP2=3xATR TP3=5xATR (unchanged levels)
   '5M':  [0.75, 1.5, 2.5],   // same
   '15M': [1, 2, 3],           // unchanged
   '30M': [1, 2, 3],
@@ -45,6 +45,8 @@ const MIN_ATR: Record<string, number> = {
 // ATR 2-6 = 49% WR (+200 pips); ATR 10+ = strong trend days (+127 pips).
 const ATR_CHOP_BAND: Record<string, [number, number]> = {
   '5M': [6.0, 10.0],
+  // 1M: everything above 6 is news-spike chaos — 10 trades, 3W, -63 pips
+  '1M': [6.0, 99999.0],
 };
 const inChopBand = (tf: string, atr: number): boolean => {
   const band = ATR_CHOP_BAND[tf];
@@ -101,6 +103,9 @@ function isSessionActive(tf: string, date: Date): boolean {
   // 5M only: block 18:00-18:59 IST — 8:30 ET US data releases whipsaw gold
   // (14 trades in that hour: 5W/9L, -65.8 pips — worst hour of the day)
   if (tf === '5M' && istHours >= 18.0 && istHours < 19.0) return false;
+  // 1M only: block 00:00-00:59 IST (dead NY liquidity, 1W/9L, -70 pips)
+  // and 20:00-20:59 IST (post-NY-open reversal chop, 6W/19L, -42 pips)
+  if (tf === '1M' && ((istHours >= 0.0 && istHours < 1.0) || (istHours >= 20.0 && istHours < 21.0))) return false;
   return inLondon || inNY;
 }
 
@@ -1112,6 +1117,8 @@ Deno.serve(async (req) => {
         console.log(`[${l}] First run — skipping (streak cooldown ${Math.round(streakFirst.remainingMs/60000)}min left)`);
       } else if (inChopBand(l, atr)) {
         console.log(`[${l}] First run — skipping (ATR ${atr.toFixed(2)} in chop band ${ATR_CHOP_BAND[l]})`);
+      } else if (atr < (MIN_ATR[l] || 0)) {
+        console.log(`[${l}] First run — skipping (ATR ${atr.toFixed(2)} below min ${(MIN_ATR[l]||0)})`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
@@ -1186,7 +1193,7 @@ Deno.serve(async (req) => {
         console.log(`[${l}] All TPs — NEWS BLACKOUT: ${newsStatus.event}`);
       } else if (streakAllTP.paused) {
         console.log(`[${l}] All TPs — skipping (streak cooldown ${Math.round(streakAllTP.remainingMs/60000)}min left)`);
-      } else if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP && confluenceOKAllTP && !inChopBand(l, atr)) {
+      } else if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP && confluenceOKAllTP && !inChopBand(l, atr) && atr >= (MIN_ATR[l] || 0)) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
 
