@@ -39,6 +39,17 @@ const MIN_ATR: Record<string, number> = {
   '5M': 2.0,
   '15M': 0, '30M': 0, '1H': 0, '4H': 0,  // no filter for higher TFs
 };
+
+// ── ATR chop band: skip entries when volatility is in the whipsaw zone ──
+// 5M data (101 trades): ATR 6-10 = 25 trades, 28% WR, net -100 pips (dead zone).
+// ATR 2-6 = 49% WR (+200 pips); ATR 10+ = strong trend days (+127 pips).
+const ATR_CHOP_BAND: Record<string, [number, number]> = {
+  '5M': [6.0, 10.0],
+};
+const inChopBand = (tf: string, atr: number): boolean => {
+  const band = ATR_CHOP_BAND[tf];
+  return band ? (atr > band[0] && atr <= band[1]) : false;
+};
 const TICKS = 3;                // 3 ticks per run
 const TICK_MS = 10000;          // 10s between ticks
 const TV_SYMBOL = 'OANDA:XAUUSD';
@@ -87,6 +98,9 @@ function isSessionActive(tf: string, date: Date): boolean {
 
   const inLondon = istHours >= 12.5 && istHours < 21.0;
   const inNY = istHours >= 17.0 || istHours < 1.5; // NY extends past midnight
+  // 5M only: block 18:00-18:59 IST — 8:30 ET US data releases whipsaw gold
+  // (14 trades in that hour: 5W/9L, -65.8 pips — worst hour of the day)
+  if (tf === '5M' && istHours >= 18.0 && istHours < 19.0) return false;
   return inLondon || inNY;
 }
 
@@ -1012,9 +1026,10 @@ Deno.serve(async (req) => {
 
       if ((flippedToShort && s.dir === 'long') || (flippedToLong && s.dir === 'short')) {
         if (!s.slHit && !s.allDone) {
-          // 1M: require 3 consecutive flip confirmations before closing (anti-noise)
-          // Higher TFs close immediately (less noise)
-          if (l === '1M') {
+          // 1M + 5M: require 3 consecutive flip confirmations before closing (anti-noise)
+          // 5M added 2026-09-26: 40 ema_flip exits = -420 pips, biggest 5M leak.
+          // Shallow whipsaw flips were closing trades that later recovered.
+          if (l === '1M' || l === '5M') {
             s.flipExitConfirmCount = (s.flipExitConfirmCount || 0) + 1;
             if (s.flipExitConfirmCount < 3) {
               console.log(`[${l}] EMA flip exit waiting for confirmation (${s.flipExitConfirmCount}/3)`);
@@ -1095,6 +1110,8 @@ Deno.serve(async (req) => {
         console.log(`[${l}] First run — skipping low confluence entry`);
       } else if (streakFirst.paused) {
         console.log(`[${l}] First run — skipping (streak cooldown ${Math.round(streakFirst.remainingMs/60000)}min left)`);
+      } else if (inChopBand(l, atr)) {
+        console.log(`[${l}] First run — skipping (ATR ${atr.toFixed(2)} in chop band ${ATR_CHOP_BAND[l]})`);
       } else {
         // Smart entry: set limit order at pullback instead of market entry
         const pullback = atr * (TF_PULLBACK_ATR[l] || SMART_ENTRY_PULLBACK_ATR);
@@ -1169,7 +1186,7 @@ Deno.serve(async (req) => {
         console.log(`[${l}] All TPs — NEWS BLACKOUT: ${newsStatus.event}`);
       } else if (streakAllTP.paused) {
         console.log(`[${l}] All TPs — skipping (streak cooldown ${Math.round(streakAllTP.remainingMs/60000)}min left)`);
-      } else if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP && confluenceOKAllTP) {
+      } else if (!inAllTPCooldown && spreadOK && !rsiNeutralAllTP && trendAlignedAllTP && dxyConfirmedAllTP && confluenceOKAllTP && !inChopBand(l, atr)) {
         const signal = ema9 > ema21 ? 'buy' : 'sell';
         const dir = signal === 'buy' ? 'long' : 'short';
 
@@ -1276,7 +1293,7 @@ Deno.serve(async (req) => {
         console.log(`[${l}] SL/flip — low confluence: ${confluenceSL.score}/${TFS.length} aligned=${confluenceSL.aligned.join(',')}`);
       }
 
-      const shouldEnter = !newsStatus.blackout && !streakSL.paused && !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL && confluenceOKSL;
+      const shouldEnter = !newsStatus.blackout && !streakSL.paused && !inCooldown && spreadOKSL && !rsiNeutral && atrOKSL && trendAligned && dxyConfirmedSL && confluenceOKSL && !inChopBand(l, atr);
 
       if (shouldEnter) {
         const dir = currentLong ? 'long' : 'short';
@@ -1459,6 +1476,38 @@ Deno.serve(async (req) => {
     minutes: newsStatus.minutes,
     updated: now
   };
+
+  // ── Daily __prevClose refresh (engine-owned — fixes race with update-prev-close cron) ──
+  // The old update-prev-close cron wrote __prevClose via RPC, but this engine holds
+  // states in memory for ~22s and writes the FULL object back, clobbering the RPC write.
+  // Fix: the engine owns __prevClose and refreshes it daily from the scanner data
+  // it already fetches (close - change_abs = previous daily close).
+  try {
+    const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const pcData = states.__prevClose || {};
+    if (pcData.date !== todayKey) {
+      const dClose = parseFloat(tvData['close']);
+      const dChangeAbs = parseFloat(tvData['change_abs']);
+      if (!isNaN(dClose) && dClose > 0 && !isNaN(dChangeAbs)) {
+        const pcValue = dClose - dChangeAbs;
+        if (pcValue > 0) {
+          states.__prevClose = {
+            value: pcValue,
+            open: parseFloat(tvData['open']) || 0,
+            high: parseFloat(tvData['high']) || 0,
+            low: parseFloat(tvData['low']) || 0,
+            close: dClose,
+            source: 'tradingview',
+            date: todayKey,
+            updated: now
+          };
+          console.log(`[PREV] prevClose refreshed for ${todayKey}: ${pcValue}`);
+        }
+      }
+    }
+  } catch (e) {
+    errors.push(`prevClose refresh: ${(e as Error).message}`);
+  }
 
   // ── Save trading state ──
   try {
