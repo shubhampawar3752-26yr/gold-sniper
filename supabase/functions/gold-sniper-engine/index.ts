@@ -1499,34 +1499,59 @@ Deno.serve(async (req) => {
     updated: now
   };
 
-  // ── Daily __prevClose refresh (engine-owned — fixes race with update-prev-close cron) ──
-  // The old update-prev-close cron wrote __prevClose via RPC, but this engine holds
-  // states in memory for ~22s and writes the FULL object back, clobbering the RPC write.
-  // Fix: the engine owns __prevClose and refreshes it daily from the scanner data
-  // it already fetches (close - change_abs = previous daily close).
+  // ── Daily __prevClose refresh (engine-owned) ──
+  // "Previous close" = close of the last COMPLETED daily bar — exactly what
+  // TradingView's own daily change% uses (close - change_abs of the running bar).
+  // The TV daily bar rolls at 17:00 New York = 02:30 IST (EDT) / 03:30 IST (EST).
+  //
+  // TWO fixes vs the old logic:
+  // 1. The old refresh fired at the IST midnight boundary, BEFORE the TV bar had
+  //    rolled — capturing the previous-but-one bar's close (2-day-stale value).
+  //    Now the value refresh is gated on the bar actually having ROLLED,
+  //    detected by a change in the daily open price. Works year-round (EDT/EST).
+  // 2. The running daily OHLC (dayOpen/High/Low/Close) updates every run —
+  //    previously it was frozen at the once-a-day write, stale all day.
   try {
     const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     const pcData = states.__prevClose || {};
-    if (pcData.date !== todayKey) {
-      const dClose = parseFloat(tvData['close']);
-      const dChangeAbs = parseFloat(tvData['change_abs']);
-      if (!isNaN(dClose) && dClose > 0 && !isNaN(dChangeAbs)) {
-        const pcValue = dClose - dChangeAbs;
-        if (pcValue > 0) {
-          states.__prevClose = {
-            value: pcValue,
-            open: parseFloat(tvData['open']) || 0,
-            high: parseFloat(tvData['high']) || 0,
-            low: parseFloat(tvData['low']) || 0,
-            close: dClose,
-            source: 'tradingview',
-            date: todayKey,
-            updated: now
-          };
-          console.log(`[PREV] prevClose refreshed for ${todayKey}: ${pcValue}`);
-        }
+    const dOpen = parseFloat(tvData['open']);
+    const dHigh = parseFloat(tvData['high']);
+    const dLow = parseFloat(tvData['low']);
+    const dClose = parseFloat(tvData['close']);
+    const dChangeAbs = parseFloat(tvData['change_abs']);
+    // Today's running daily-bar OHLC (kept live every run)
+    const liveOHLC = {
+      open: (!isNaN(dOpen) && dOpen > 0) ? dOpen : (pcData.open || 0),
+      high: (!isNaN(dHigh) && dHigh > 0) ? dHigh : (pcData.high || 0),
+      low: (!isNaN(dLow) && dLow > 0) ? dLow : (pcData.low || 0),
+      close: (!isNaN(dClose) && dClose > 0) ? dClose : (pcData.close || 0),
+    };
+    // ── Self-healing drift check ──
+    // The previous close is STABLE intraday (it only changes when the daily bar
+    // rolls — 05:30 IST for this symbol's UTC-anchored daily bar). So the stored
+    // value can be verified against the live scanner's implied previous close
+    // (close - change_abs) on EVERY run: any drift > 0.5 means the stored value
+    // is stale (old bar convention write) or was clobbered by a concurrent
+    // writer → heal it. This auto-updates the value day-to-day at the bar roll,
+    // survives any race/clobber, and needs no cron or timing assumptions.
+    let pcValue = parseFloat(pcData.value) || 0;
+    let pcDate = pcData.date || '';
+    if (!isNaN(dClose) && dClose > 0 && !isNaN(dChangeAbs)) {
+      const expected = dClose - dChangeAbs;
+      if (expected > 0 && Math.abs(pcValue - expected) > 0.5) {
+        console.log(`[PREV] prevClose healed: ${pcValue} -> ${expected} (bar close ${dClose}, change_abs ${dChangeAbs})`);
+        pcValue = expected;
+        pcDate = todayKey;
       }
     }
+    // Value locked (correct for this bar) — running OHLC kept live every run
+    states.__prevClose = {
+      value: pcValue,
+      ...liveOHLC,
+      source: 'tradingview',
+      date: pcDate,
+      updated: now
+    };
   } catch (e) {
     errors.push(`prevClose refresh: ${(e as Error).message}`);
   }

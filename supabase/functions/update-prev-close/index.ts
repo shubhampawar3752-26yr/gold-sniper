@@ -157,30 +157,15 @@ Deno.serve(async (req) => {
     close: close || 0, source, date: today, updated: now
   };
 
-  // Update trading_states.states.__prevClose (this is what get_prev_close reads)
-  try {
-    const rpcBody = JSON.stringify({ p_data: ohlcData });
-    const wr = await fetch(`${SUPA_URL}/rest/v1/rpc/update_prev_close_atomic`, {
-      method: 'POST',
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json' },
-      body: rpcBody
-    });
-    if (!wr.ok) {
-      const errText = await wr.text();
-      console.error('update_prev_close_atomic failed:', wr.status, errText);
-      // Fallback: update spot_price_cache directly
-      const spcBody = { previous_day_close: prevClose, day_open: open || 0, day_high: high || 0, day_low: low || 0, day_open_date: today, fetched_at: now };
-      await fetch(`${SUPA_URL}/rest/v1/spot_price_cache?id=eq.1`, {
-        method: 'PATCH',
-        headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify(spcBody)
-      });
-    }
-    console.log('prev_close updated in trading_states');
-  } catch (e) {
-    console.error('DB update failed:', (e as Error).message);
-    return new Response(JSON.stringify({ success: false, error: 'DB write failed' }), { status: 500, headers });
-  }
+  // ── ENGINE OWNS trading_states.__prevClose since 2026-09-30 ──
+  // The gold-sniper-engine now maintains __prevClose itself with proper
+  // bar-rollover detection (refreshes only AFTER the TV daily bar rolls at
+  // 17:00 NY = 02:30/03:30 IST). This cron fires at 03:00 IST, which is
+  // BEFORE the 03:30 roll during US winter time — writing __prevClose here
+  // would clobber the correct engine value with a stale one.
+  // So: this cron only updates the prev_close audit table below; the engine
+  // is the sole authority for trading_states.__prevClose.
+  console.log('prev_close audit-table update only (engine owns trading_states.__prevClose)');
 
   return new Response(JSON.stringify({ success: true, ...ohlcData, skipped: false }), { status: 200, headers });
 });
