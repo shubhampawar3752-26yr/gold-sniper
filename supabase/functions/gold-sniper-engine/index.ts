@@ -203,6 +203,7 @@ function ns() {
     pendingAtr: 0, pendingCycle: 0,
     smartEntry: false,
     flipExitConfirmCount: 0,
+    dayHiAtEntry: 0, dayLoAtEntry: 0,
   };
 }
 
@@ -217,11 +218,37 @@ function setLevels(s: any, a: number, l: string) {
   s.tp3 = s.dir === 'long' ? s.entry + r * rr[2] : s.entry - r * rr[2];
 }
 
-function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
+function chkTick(px: number, s: any, l: string, prev: any, al: any[], dHi: number = 0, dLo: number = 0) {
   if (s.allDone || s.slHit || s.entry === 0) return;
   const dir = s.dir === 'long' ? 'buy' : 'sell';
 
-  if (isSLHit(px, s.sl, s.dir)) {
+  // ── Intraminute touch detection via daily-bar extremes ──
+  // TP/SL levels are computed from the TV scanner (OANDA:XAUUSD), but the engine
+  // only samples the price a few times per minute — a spike that touches a level
+  // between samples was missed entirely. The scanner's DAILY high/low (same feed
+  // the levels come from) sees every tick of the day, so any extreme beyond a
+  // level counts as a touch.
+  // Guard: for trades opened in the CURRENT daily bar (UTC-anchored, rolls
+  // 05:30 IST), compare against the day high/low snapshot taken at entry so
+  // PRE-entry extremes are never counted as touches. Trades opened in an
+  // earlier bar: the whole current bar is post-entry, no guard needed.
+  const barStart = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+  const sameBar = !s.entryTime || new Date(s.entryTime).getTime() >= barStart;
+  // Trades opened in an earlier bar: the whole current bar is post-entry → permissive.
+  // Trades opened in the CURRENT bar WITH an entry-time snapshot: guard = snapshot.
+  // Trades opened in the current bar WITHOUT a snapshot (opened before this
+  // feature deployed): the bar extremes can't be attributed to post-entry
+  // price action → block extreme-based detection entirely (sampled px only).
+  const hasSnap = parseFloat(s.dayHiAtEntry) > 0 && parseFloat(s.dayLoAtEntry) > 0;
+  const hiGuard = !sameBar ? -1 : (hasSnap ? parseFloat(s.dayHiAtEntry) : Infinity);
+  const loGuard = !sameBar ? Infinity : (hasSnap ? parseFloat(s.dayLoAtEntry) : -Infinity);
+  const long = s.dir === 'long';
+  // Level touched by ANY observed price this bar (sampled close or bar extreme)
+  const tpTouched = (lvl: number) => long
+    ? (px >= lvl || (dHi > 0 && dHi >= lvl && dHi > hiGuard))
+    : (px <= lvl || (dLo > 0 && dLo <= lvl && dLo < loGuard));
+  if (long ? (px <= s.sl || (dLo > 0 && dLo <= s.sl && dLo < loGuard))
+           : (px >= s.sl || (dHi > 0 && dHi >= s.sl && dHi > hiGuard))) {
     // Don't record SL alert if TP1 was already hit — it's a winning trade
     if (!s.tp1Hit && !prev.slHit) al.push({ type: 'sl', timeframe: l, sl: s.sl, entry: s.entry, direction: dir, cycle: s.cycle, price: px, sent: false });
     s.slHit = true;
@@ -229,20 +256,20 @@ function chkTick(px: number, s: any, l: string, prev: any, al: any[]) {
   }
 
   // TP1 hit → move SL to entry (breakeven)
-  if (!s.tp1Hit && hit(px, s.tp1, s.dir)) {
+  if (!s.tp1Hit && tpTouched(s.tp1)) {
     s.tp1Hit = true;
     s.sl = s.entry; // Move SL to entry price (breakeven)
     s.slMovedToBE = true;
     if (!prev.tp1) al.push({ type: 'tp', timeframe: l, tp_num: 1, tp_price: s.tp1, entry: s.entry, direction: dir, sl: s.sl, sl_moved: 'breakeven', cycle: s.cycle, price: px, progress: 1, sent: false });
   }
   // TP2 hit → move SL to TP1 price
-  if (s.tp1Hit && !s.tp2Hit && hit(px, s.tp2, s.dir)) {
+  if (s.tp1Hit && !s.tp2Hit && tpTouched(s.tp2)) {
     s.tp2Hit = true;
     s.sl = s.tp1; // Move SL to TP1 price (lock in TP1 profit)
     s.slMovedToTP1 = true;
     if (!prev.tp2) al.push({ type: 'tp', timeframe: l, tp_num: 2, tp_price: s.tp2, entry: s.entry, direction: dir, sl: s.sl, sl_moved: 'tp1', cycle: s.cycle, price: px, progress: 2, sent: false });
   }
-  if (s.tp2Hit && !s.tp3Hit && hit(px, s.tp3, s.dir)) {
+  if (s.tp2Hit && !s.tp3Hit && tpTouched(s.tp3)) {
     s.tp3Hit = true;
     // TP3 hit = target achieved — no SL move needed, trade closes at TP3
     if (!prev.tp3) al.push({ type: 'tp', timeframe: l, tp_num: 3, tp_price: s.tp3, entry: s.entry, direction: dir, sl: s.sl, cycle: s.cycle, price: px, progress: 3, sent: false });
@@ -909,10 +936,15 @@ Deno.serve(async (req) => {
   let tvData: Record<string, any> = {};
   let livePrice: number | null = null;
   let aiAnalysis: Record<string, any> = {};
+  // Daily-bar extremes (same TV feed the TP/SL levels come from) — used by
+  // chkTick for intraminute touch detection so no TP/SL spike is missed
+  let dayHi = 0, dayLo = 0;
 
   try {
     tvData = await fetchTVIndicators();
     livePrice = tvData['close'] || tvData['close|1'] || null;
+    dayHi = parseFloat(tvData['high']) || 0;
+    dayLo = parseFloat(tvData['low']) || 0;
   } catch (e) {
     errors.push(`TV scanner: ${(e as Error).message}`);
     livePrice = await fetchLivePrice();
@@ -997,6 +1029,10 @@ Deno.serve(async (req) => {
         s.lastSignal = s.pendingDir === 'long' ? 'buy' : 'sell';
         setLevels(s, s.pendingAtr, l);
         s.entryTime = new Date().toISOString();
+        // Day bar high/low at entry — used by chkTick so PRE-entry extremes
+        // of the current daily bar are never counted as TP/SL touches
+        s.dayHiAtEntry = parseFloat(tvData['high']) || 0;
+        s.dayLoAtEntry = parseFloat(tvData['low']) || 0;
 
         const ai = aiAnalysis[l];
         const aiCheck = aiConfirms(ai, s.dir);
@@ -1025,7 +1061,7 @@ Deno.serve(async (req) => {
       if (s.pendingEntry > 0) {
         s.prevEma9 = ema9;
         s.prevEma21 = ema21;
-        if (tfPrice && s.entry > 0) chkTick(tfPrice, s, l, prev[l] || {}, alerts);
+        if (tfPrice && s.entry > 0) chkTick(tfPrice, s, l, prev[l] || {}, alerts, dayHi, dayLo);
         tfResults.push({ tf: l, ema9, ema21, signal: ema9 > ema21 ? 'buy' : 'sell', atr, rsi, entry: s.entry, sl: s.sl, cycle: s.cycle, dir: s.dir, slHit: s.slHit, allDone: s.allDone, tpHits: [s.tp1Hit, s.tp2Hit, s.tp3Hit], pendingEntry: s.pendingEntry, smartEntry: true });
         continue;
       }
@@ -1348,7 +1384,7 @@ Deno.serve(async (req) => {
     s.prevEma21 = ema21;
 
     // ── Tick 0: check TP/SL with current price ──
-    if (tfPrice && s.entry > 0) chkTick(tfPrice, s, l, prev[l] || {}, alerts);
+    if (tfPrice && s.entry > 0) chkTick(tfPrice, s, l, prev[l] || {}, alerts, dayHi, dayLo);
 
     tfResults.push({
       tf: l, ema9, ema21, signal: ema9 > ema21 ? 'buy' : 'sell', atr, rsi,
@@ -1369,7 +1405,7 @@ Deno.serve(async (req) => {
       for (const tf of TFS) {
         const l = tf.l;
         const s = states[l];
-        if (s && s.entry > 0) chkTick(tickPrice, s, l, prev[l] || {}, alerts);
+        if (s && s.entry > 0) chkTick(tickPrice, s, l, prev[l] || {}, alerts, dayHi, dayLo);
       }
     } catch (e) {
       errors.push(`Tick ${t}: ${(e as Error).message}`);
