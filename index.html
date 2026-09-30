@@ -102,6 +102,12 @@ body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', syste
 .tf-signal.waiting { background: rgba(255,255,255,0.05); color: var(--muted); }
 .tf-signal.stopped { background: rgba(255,68,68,0.1); color: var(--red); }
 .tf-signal.complete { background: rgba(255,215,0,0.1); color: var(--gold); }
+.tf-levels { margin: 4px 0 6px; display: flex; flex-direction: column; gap: 2px; }
+.tf-levels .lvl { font-size: 10px; font-family: monospace; color: var(--muted); display: flex; justify-content: center; gap: 6px; }
+.tf-levels .lvl .tag { font-weight: 700; }
+.tf-levels .lvl.sl .tag { color: var(--red); }
+.tf-levels .lvl .tp-hit { color: var(--green); font-weight: 700; }
+.tf-levels .lvl .dist { color: #888; font-size: 9px; }
 .tf-dots { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; }
 .tf-dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.15); }
 .tf-dot.hit { background: var(--green); border-color: var(--green); }
@@ -484,7 +490,26 @@ async function fetchD() {
         const sigClass = st === 'active' ? dc(dir) : st;
         const sigText = st === 'active' ? dl(dir) : st === 'waiting' ? 'WAITING' : st.toUpperCase();
         const dots = [t.tp1Hit, t.tp2Hit, t.tp3Hit].map(h => '<div class="tf-dot ' + (h ? 'hit' : '') + '"></div>').join('');
-        return '<div class="tf-card ' + st + (dir ? ' ' + dc(dir) : '') + '"><div class="tf-label">' + t.timeframe + '</div><div class="tf-signal ' + sigClass + '">' + sigText + '</div><div class="tf-dots">' + dots + '</div><div class="tf-cycle">Cycle #' + (t.cycle || '—') + '</div><div class="tf-entry">' + (t.entry > 0 ? '$' + fmt(t.entry) : '—') + '</div></div>';
+        // Level strip: SL + TP1/2/3 with hit marks and live distance to the next pending level
+        let levels = '';
+        if (st === 'active' && t.entry > 0) {
+          const spot = lastPrice;
+          const tpDefs = [{ n: 'TP1', p: t.tp1, h: t.tp1Hit }, { n: 'TP2', p: t.tp2, h: t.tp2Hit }, { n: 'TP3', p: t.tp3, h: t.tp3Hit }];
+          let nextDist = '';
+          if (spot) {
+            const nextTp = tpDefs.find(x => !x.h && x.p > 0);
+            if (nextTp) {
+              const d = nextTp.p - spot;
+              nextDist = ' <span class="dist">(' + (d >= 0 ? '+' : '') + d.toFixed(2) + ' to ' + nextTp.n + ')</span>';
+            }
+          }
+          const tpRow = tpDefs.map(x => {
+            if (!(x.p > 0)) return '';
+            return '<span class="' + (x.h ? 'tp-hit' : '') + '">' + x.n + (x.h ? ' ✓' : '') + ' ' + fmt(x.p) + '</span>';
+          }).join('');
+          levels = '<div class="tf-levels"><div class="lvl sl"><span class="tag">SL</span><span class="' + (t.sl > 0 ? '' : '') + '">' + (t.sl > 0 ? fmt(t.sl) : '—') + '</span></div><div class="lvl">' + tpRow + nextDist + '</div></div>';
+        }
+        return '<div class="tf-card ' + st + (dir ? ' ' + dc(dir) : '') + '"><div class="tf-label">' + t.timeframe + '</div><div class="tf-signal ' + sigClass + '">' + sigText + '</div><div class="tf-dots">' + dots + '</div>' + levels + '<div class="tf-cycle">Cycle #' + (t.cycle || '—') + '</div><div class="tf-entry">' + (t.entry > 0 ? '$' + fmt(t.entry) : '—') + '</div></div>';
       }).join('');
     }
 
