@@ -47,6 +47,9 @@ const ATR_CHOP_BAND: Record<string, [number, number]> = {
   '5M': [6.0, 10.0],
   // 1M: everything above 6 is news-spike chaos — 10 trades, 3W, -63 pips
   '1M': [6.0, 99999.0],
+  // 15M: ATR 8-10 = whipsaw zone — 22 trades, 27% WR, -33 pips
+  // (ATR 6-8 profitable, 10+ strong-trend days profitable)
+  '15M': [8.0, 10.0],
 };
 const inChopBand = (tf: string, atr: number): boolean => {
   const band = ATR_CHOP_BAND[tf];
@@ -90,22 +93,25 @@ const SESSIONS = {
 const SESSION_FILTERED_TFS = ['1M', '5M'];
 
 function isSessionActive(tf: string, date: Date): boolean {
-  if (!SESSION_FILTERED_TFS.includes(tf)) return true; // Higher TFs trade all sessions
-
   // Convert to IST (UTC+5:30)
   const istOffset = 5.5 * 60 * 60 * 1000;
   const ist = new Date(date.getTime() + istOffset - date.getTimezoneOffset() * 60000);
   // Get IST hours as decimal (0-24)
   const istHours = ist.getUTCHours() + ist.getUTCMinutes() / 60;
 
+  // ── Per-TF toxic hour blocks (data-driven, see trade_history analysis) ──
+  // Applied BEFORE the session gate so they cover non-session-filtered TFs too.
+  // 5M: 18:00-18:59 — 8:30 ET US data releases whipsaw gold (5W/9L, -65.8 pips)
+  if (tf === '5M' && istHours >= 18.0 && istHours < 19.0) return false;
+  // 1M: 00:00-00:59 dead NY liquidity (1W/9L, -70) + 20:00-20:59 post-NY chop (6W/19L, -42)
+  if (tf === '1M' && ((istHours >= 0.0 && istHours < 1.0) || (istHours >= 20.0 && istHours < 21.0))) return false;
+  // 15M: 18:00-18:59 US data hour (1W/9L, -92.7 pips — worst 15M hour)
+  // + 00:00-02:59 Asian dead liquidity (2W/10L, -79.3 pips)
+  if (tf === '15M' && ((istHours >= 18.0 && istHours < 19.0) || istHours < 3.0)) return false;
+
+  if (!SESSION_FILTERED_TFS.includes(tf)) return true; // Higher TFs trade all sessions
   const inLondon = istHours >= 12.5 && istHours < 21.0;
   const inNY = istHours >= 17.0 || istHours < 1.5; // NY extends past midnight
-  // 5M only: block 18:00-18:59 IST — 8:30 ET US data releases whipsaw gold
-  // (14 trades in that hour: 5W/9L, -65.8 pips — worst hour of the day)
-  if (tf === '5M' && istHours >= 18.0 && istHours < 19.0) return false;
-  // 1M only: block 00:00-00:59 IST (dead NY liquidity, 1W/9L, -70 pips)
-  // and 20:00-20:59 IST (post-NY-open reversal chop, 6W/19L, -42 pips)
-  if (tf === '1M' && ((istHours >= 0.0 && istHours < 1.0) || (istHours >= 20.0 && istHours < 21.0))) return false;
   return inLondon || inNY;
 }
 
@@ -1031,10 +1037,11 @@ Deno.serve(async (req) => {
 
       if ((flippedToShort && s.dir === 'long') || (flippedToLong && s.dir === 'short')) {
         if (!s.slHit && !s.allDone) {
-          // 1M + 5M: require 3 consecutive flip confirmations before closing (anti-noise)
+          // 1M + 5M + 15M: require 3 consecutive flip confirmations before closing (anti-noise)
           // 5M added 2026-09-26: 40 ema_flip exits = -420 pips, biggest 5M leak.
+          // 15M added 2026-09-30: 42 ema_flip exits = -374 pips (43% of 15M trades).
           // Shallow whipsaw flips were closing trades that later recovered.
-          if (l === '1M' || l === '5M') {
+          if (l === '1M' || l === '5M' || l === '15M') {
             s.flipExitConfirmCount = (s.flipExitConfirmCount || 0) + 1;
             if (s.flipExitConfirmCount < 3) {
               console.log(`[${l}] EMA flip exit waiting for confirmation (${s.flipExitConfirmCount}/3)`);
