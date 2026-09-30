@@ -414,13 +414,13 @@ function renderHistory(history) {
       title = `New ${dl(a.direction)} Signal — ${a.timeframe}`;
       meta = `Entry $${fmt(a.entry)} · SL $${fmt(a.sl)} · Cycle #${a.cycle}`;
     } else if (a.type === 'tp') {
-      title = `TP${a.tp_num || '?'} Hit — ${a.timeframe}`;
+      title = `${dl(a.direction)} TP${a.tp_num || '?'} Hit — ${a.timeframe}`;
       meta = `TP Price $${fmt(a.tp_price)} · Cycle #${a.cycle}`;
     } else if (a.type === 'sl') {
-      title = `Stop Loss Hit — ${a.timeframe}`;
+      title = `${dl(a.direction)} Stop Loss Hit — ${a.timeframe}`;
       meta = `SL $${fmt(a.sl)} · Entry was $${fmt(a.entry)}`;
     } else if (a.type === 'alldone') {
-      title = `All TPs Hit! — ${a.timeframe}`;
+      title = `${dl(a.direction)} All TPs Hit! — ${a.timeframe}`;
       meta = `Entry $${fmt(a.entry)} · Cycle #${a.cycle} complete`;
     } else {
       title = `${a.type} — ${a.timeframe || '?'}`;
