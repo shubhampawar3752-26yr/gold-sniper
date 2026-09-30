@@ -50,6 +50,12 @@ const ATR_CHOP_BAND: Record<string, [number, number]> = {
   // 15M: ATR 8-10 = whipsaw zone — 22 trades, 27% WR, -33 pips
   // (ATR 6-8 profitable, 10+ strong-trend days profitable)
   '15M': [8.0, 10.0],
+  // 30M: ATR 12-14 = dead zone — 16 trades, 19% WR, -28 pips
+  // (ATR 10-12 and 14+ both profitable)
+  '30M': [12.0, 14.0],
+  // 1H: ATR 14-18 = dead zone — 18 trades, 28% WR, -49 pips
+  // (ATR 19.9+ strong-trend days: 12 trades, 7W, +377 pips)
+  '1H': [14.0, 18.0],
 };
 const inChopBand = (tf: string, atr: number): boolean => {
   const band = ATR_CHOP_BAND[tf];
@@ -101,13 +107,13 @@ function isSessionActive(tf: string, date: Date): boolean {
 
   // ── Per-TF toxic hour blocks (data-driven, see trade_history analysis) ──
   // Applied BEFORE the session gate so they cover non-session-filtered TFs too.
-  // 5M: 18:00-18:59 — 8:30 ET US data releases whipsaw gold (5W/9L, -65.8 pips)
-  if (tf === '5M' && istHours >= 18.0 && istHours < 19.0) return false;
+  // 18:00-18:59 IST = 8:30 ET US data releases — worst hour on nearly every TF:
+  // 5M -65.8 (5W/9L), 15M -92.7 (1W/9L), 30M -130.1 (2W/11L), 1H -13 (1W/3, included)
+  if ((tf === '5M' || tf === '15M' || tf === '30M' || tf === '1H') && istHours >= 18.0 && istHours < 19.0) return false;
   // 1M: 00:00-00:59 dead NY liquidity (1W/9L, -70) + 20:00-20:59 post-NY chop (6W/19L, -42)
   if (tf === '1M' && ((istHours >= 0.0 && istHours < 1.0) || (istHours >= 20.0 && istHours < 21.0))) return false;
-  // 15M: 18:00-18:59 US data hour (1W/9L, -92.7 pips — worst 15M hour)
-  // + 00:00-02:59 Asian dead liquidity (2W/10L, -79.3 pips)
-  if (tf === '15M' && ((istHours >= 18.0 && istHours < 19.0) || istHours < 3.0)) return false;
+  // 15M: 00:00-02:59 Asian dead liquidity (2W/10L, -79.3 pips)
+  if (tf === '15M' && istHours < 3.0) return false;
 
   if (!SESSION_FILTERED_TFS.includes(tf)) return true; // Higher TFs trade all sessions
   const inLondon = istHours >= 12.5 && istHours < 21.0;
@@ -1037,11 +1043,13 @@ Deno.serve(async (req) => {
 
       if ((flippedToShort && s.dir === 'long') || (flippedToLong && s.dir === 'short')) {
         if (!s.slHit && !s.allDone) {
-          // 1M + 5M + 15M: require 3 consecutive flip confirmations before closing (anti-noise)
+          // 1M..1H: require 3 consecutive flip confirmations before closing (anti-noise)
           // 5M added 2026-09-26: 40 ema_flip exits = -420 pips, biggest 5M leak.
           // 15M added 2026-09-30: 42 ema_flip exits = -374 pips (43% of 15M trades).
+          // 30M/1H added 2026-09-30: 33 flips = -473 pips (53% of 30M) / 15 flips = -345 pips (50% of 1H).
+          // 4H keeps immediate exit (sample too small, flips rare and meaningful).
           // Shallow whipsaw flips were closing trades that later recovered.
-          if (l === '1M' || l === '5M' || l === '15M') {
+          if (l === '1M' || l === '5M' || l === '15M' || l === '30M' || l === '1H') {
             s.flipExitConfirmCount = (s.flipExitConfirmCount || 0) + 1;
             if (s.flipExitConfirmCount < 3) {
               console.log(`[${l}] EMA flip exit waiting for confirmation (${s.flipExitConfirmCount}/3)`);
