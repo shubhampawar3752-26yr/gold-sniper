@@ -229,6 +229,23 @@ Deno.serve(async (req) => {
     tfData[tf] = { entries, tps, sls, dones, wins: entries.length, losses, winRate, cycles: entries.length };
   }
 
+  // ── Accurate per-TF win rates for the period, from trade_history ──
+  // A trade is a WIN if it hit TP1 (trailing SL locks profit at/above entry) or closed PnL-positive.
+  // Fixes the old badge math that counted every entry alert as a win.
+  const tfPeriod: Record<string, { trades: number; wins: number; losses: number; wr: number; pips: number }> = {};
+  for (const tf of TFS) tfPeriod[tf] = { trades: 0, wins: 0, losses: 0, wr: 0, pips: 0 };
+  for (const t of tradeHistory) {
+    const p = tfPeriod[t.timeframe];
+    if (!p) continue;
+    p.trades++;
+    p.pips += parseFloat(t.pnl_pips || 0);
+    if (t.tp1_hit || parseFloat(t.pnl_pips || 0) > 0) p.wins++; else p.losses++;
+  }
+  for (const tf of TFS) {
+    const p = tfPeriod[tf];
+    p.wr = p.trades > 0 ? Math.round((p.wins / p.trades) * 100) : 0;
+  }
+
   // Active trades — ONLY 3 TPs
   const activeTrades = TFS.map(tf => {
     const s = state[tf];
@@ -294,6 +311,21 @@ Deno.serve(async (req) => {
     <div class="stat"><div class="num green">${activeTrades.length}</div><div class="label">ACTIVE</div></div>
   </div>`;
 
+  // ── TF-wise win rates for the period ──
+  const periodTFs = TFS.filter(tf => tfPeriod[tf].trades > 0);
+  if (periodTFs.length > 0) {
+    const wrLabel = mode === 'monthly' ? "MONTH" : mode === 'morning' ? "OVERNIGHT" : "TODAY";
+    html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">🎯 ${wrLabel}'S WIN RATE BY TIMEFRAME</span></div>`;
+    html += `<table><tr><th>Timeframe</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Pips</th></tr>`;
+    for (const tf of periodTFs) {
+      const p = tfPeriod[tf];
+      const wrCls = p.wr >= 60 ? 'green' : p.wr >= 50 ? 'gold' : 'red';
+      const pipCls = p.pips >= 0 ? 'green' : 'red';
+      html += `<tr><td><b style="color:#FFD700">${tf}</b></td><td>${p.trades}</td><td class="green">${p.wins}</td><td class="red">${p.losses}</td><td class="${wrCls}"><b>${p.wr}%</b></td><td class="${pipCls}">${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)}</td></tr>`;
+    }
+    html += `</table></div>`;
+  }
+
   // Cumulative summary section
   html += `<div class="tf-section" style="background:linear-gradient(135deg,#1a1a25,#12121a);border-color:#FFD70033">
     <div class="tf-header"><span class="tf-name" style="font-size:16px">📊 ALL-TIME SUMMARY</span></div>
@@ -343,11 +375,12 @@ Deno.serve(async (req) => {
     const d = tfData[tf];
     if (d.entries.length === 0 && d.tps.length === 0 && d.sls.length === 0 && d.dones.length === 0) continue;
 
-    const wrClass = d.winRate >= 60 ? 'wr-good' : d.winRate >= 40 ? 'wr-neutral' : d.winRate > 0 ? 'wr-bad' : 'wr-neutral';
+    const p = tfPeriod[tf] || { trades: 0, wins: 0, losses: 0, wr: 0, pips: 0 };
+    const wrClass = p.trades === 0 ? 'wr-neutral' : p.wr >= 60 ? 'wr-good' : p.wr >= 40 ? 'wr-neutral' : 'wr-bad';
 
     html += `<div class="tf-section">`;
-    html += `<div class="tf-header"><span class="tf-name">${tf}</span><span class="tf-winrate ${wrClass}">${d.winRate}% WR</span></div>`;
-    html += `<div class="tf-stats">Cycles: ${d.cycles} | Wins: ${d.wins} | Losses: ${d.losses} | TPs: ${d.tps.length} | Full Cycles: ${d.dones.length}</div>`;
+    html += `<div class="tf-header"><span class="tf-name">${tf}</span><span class="tf-winrate ${wrClass}">${p.wr}% WR (${p.wins}W/${p.losses}L)</span></div>`;
+    html += `<div class="tf-stats">Cycles: ${d.cycles} | Closed: ${p.trades} | Wins: ${p.wins} | Losses: ${p.losses} | TPs: ${d.tps.length} | Full Cycles: ${d.dones.length} | Period Pips: ${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)}</div>`;
 
     // Merge all events sorted by time
     const allEvents: {time: string, type: string, data: any}[] = [];
@@ -448,7 +481,8 @@ Deno.serve(async (req) => {
   for (const tf of TFS) {
     const d = tfData[tf];
     if (d.entries.length === 0 && d.tps.length === 0 && d.sls.length === 0) continue;
-    waMsg += `*${tf}* WR ${d.winRate}% | ${d.wins}W ${d.losses}L\n`;
+    const wp = tfPeriod[tf] || { trades: 0, wins: 0, losses: 0, wr: 0, pips: 0 };
+    waMsg += `*${tf}* WR ${wp.wr}% (${wp.wins}W/${wp.losses}L) | ${wp.pips >= 0 ? '+' : ''}${wp.pips.toFixed(1)} pips\n`;
     for (const a of d.entries) {
       const t = String(a.created_at).substring(11, 19);
       waMsg += `  🟢 ${t} ENTRY ${getDir(tf,a).toUpperCase()} $${getEntry(tf,a)?.toFixed(2)||'?'} #${a.cycle}\n`;
