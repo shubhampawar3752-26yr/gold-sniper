@@ -742,7 +742,12 @@ async function updateTradeSummary() {
 
 // ── Idempotency: check if alert already exists for this timeframe/cycle/type ──
 async function alertExists(timeframe: string, cycle: number, type: string, tpNum?: number): Promise<boolean> {
-  let url = `${SUPA_URL}/rest/v1/alerts?select=id&timeframe=eq.${timeframe}&cycle=eq.${cycle}&type=eq.${type}&limit=1`;
+  // NOTE: cycle numbers REPEAT across days (they reset when state resets),
+  // so dedup MUST be scoped to a recent window — otherwise an old alert from
+  // a previous day with the same cycle number silently suppresses today's
+  // alert as a "duplicate". Scope: created within the last 24h.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  let url = `${SUPA_URL}/rest/v1/alerts?select=id&timeframe=eq.${timeframe}&cycle=eq.${cycle}&type=eq.${type}&created_at=gte.${since}&limit=1`;
   if (tpNum != null) url += `&tp_num=eq.${tpNum}`;
   const r = await fetch(url, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
   if (!r.ok) return false;
