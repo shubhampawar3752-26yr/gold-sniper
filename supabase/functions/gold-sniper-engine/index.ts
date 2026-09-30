@@ -1068,7 +1068,7 @@ Deno.serve(async (req) => {
             type: 'entry', timeframe: l, direction: s.lastSignal,
             entry: s.entry, sl: s.sl,
             tp: { tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, atr: s.atr, rsi, aiConfirmed: aiCheck.confirmed, aiReason: aiCheck.reason, aiPattern: ai?.pattern, aiRecommendation: ai?.recommendation, aiConfidence: ai?.confidence },
-            cycle: s.cycle, price: tfPrice, sent: false, smart_entry: true,
+            cycle: s.cycle, price: tfPrice, sent: false, data: { smart_entry: true },
           });
         }
         s.smartEntry = true;
