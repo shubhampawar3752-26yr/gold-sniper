@@ -320,12 +320,30 @@ async function fetchDXYIndicators(): Promise<{ dxyBullish: boolean | null; dxy1h
     const dxy1hBullish = e9_1h > e21_1h;
     const dxy4hBullish = !isNaN(e9_4h) && !isNaN(e21_4h) ? e9_4h > e21_4h : null;
 
-    // Macro trend: bullish if BOTH 1H and 4H agree, otherwise use 1H
-    const dxyBullish = dxy4hBullish !== null
-      ? (dxy1hBullish === dxy4hBullish ? dxy1hBullish : dxy1hBullish)  // if both agree, strong signal; if disagree, use 1H
-      : dxy1hBullish;
+    // ── Neutral-zone guard ──
+    // When the 1H EMAs are effectively pinned together the 1H "trend" is
+    // noise-level — vetoing gold entries off it blocks signals for no reason.
+    // Threshold: spread < 0.05% of price = no macro signal on 1H.
+    // In that case fall back to 4H if IT has a real trend (same threshold);
+    // if both are neutral, return null (treated as "no DXY confirmation",
+    // the same as a failed fetch — the entry gates pass).
+    const NEUTRAL_PCT = 0.0005;
+    const spread1h = Math.abs(e9_1h - e21_1h);
+    const spread4h = !isNaN(e9_4h) && !isNaN(e21_4h) ? Math.abs(e9_4h - e21_4h) : 0;
+    const neutral1h = spread1h < e21_1h * NEUTRAL_PCT;
+    let dxyBullish: boolean | null;
+    if (!neutral1h) {
+      // 1H has a real trend — it wins (both agree = strong signal; disagree = 1H leads)
+      dxyBullish = dxy1hBullish;
+    } else if (dxy4hBullish !== null && spread4h >= e21_4h * NEUTRAL_PCT) {
+      // 1H neutral but 4H trending — use the 4H verdict
+      dxyBullish = dxy4hBullish;
+    } else {
+      // Both neutral — no DXY verdict, don't let noise veto entries
+      dxyBullish = null;
+    }
 
-    console.log(`DXY: 1H=${dxy1hBullish ? 'bullish' : 'bearish'} (EMA9=${e9_1h?.toFixed(2)} EMA21=${e21_1h?.toFixed(2)}) 4H=${dxy4hBullish === null ? 'N/A' : dxy4hBullish ? 'bullish' : 'bearish'} → macro=${dxyBullish ? 'bullish' : 'bearish'} price=${price?.toFixed(2) || 'N/A'}`);
+    console.log(`DXY: 1H=${dxy1hBullish ? 'bullish' : 'bearish'} (spread=${spread1h.toFixed(3)}${neutral1h ? ' NEUTRAL' : ''}) 4H=${dxy4hBullish === null ? 'N/A' : dxy4hBullish ? 'bullish' : 'bearish'} (spread=${spread4h.toFixed(3)}) → macro=${dxyBullish === null ? 'NEUTRAL' : dxyBullish ? 'bullish' : 'bearish'} price=${price?.toFixed(2) || 'N/A'}`);
 
     return {
       dxyBullish,
