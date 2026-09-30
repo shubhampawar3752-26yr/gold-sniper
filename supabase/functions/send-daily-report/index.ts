@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
   // Fetch alerts
   let alertUrl;
   if (mode === 'morning') {
-    const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=1000`;
   } else if (mode === 'monthly') {
     // Monthly: full PREVIOUS month (1st to last day)
@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
   try {
     let historyUrl: string;
     if (mode === 'morning') {
-      const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       historyUrl = `${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`;
     } else if (mode === 'monthly') {
       // Full previous month: 1st to last day
@@ -269,7 +269,7 @@ Deno.serve(async (req) => {
 
   // ── Build HTML Email ──
   const titleMap: Record<string, string> = { morning: '☀️ Morning Report', evening: '🎯 Daily Report', monthly: '📅 Monthly Report' };
-  const periodMap: Record<string, string> = { morning: 'Overnight (last 12h)', evening: "Today's Full History", monthly: 'Previous Month (1st to 31st)' };
+  const periodMap: Record<string, string> = { morning: 'Last 24 Hours', evening: "Today's Full History", monthly: 'Previous Month (1st to 31st)' };
   const title = titleMap[mode] || titleMap.evening;
   const period = periodMap[mode] || periodMap.evening;
 
@@ -314,7 +314,7 @@ Deno.serve(async (req) => {
   // ── TF-wise win rates for the period ──
   const periodTFs = TFS.filter(tf => tfPeriod[tf].trades > 0);
   if (periodTFs.length > 0) {
-    const wrLabel = mode === 'monthly' ? "MONTH" : mode === 'morning' ? "OVERNIGHT" : "TODAY";
+    const wrLabel = mode === 'monthly' ? "MONTH" : mode === 'morning' ? "LAST 24 HOURS" : "TODAY";
     html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">🎯 ${wrLabel}'S WIN RATE BY TIMEFRAME</span></div>`;
     html += `<table><tr><th>Timeframe</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Win Rate</th><th>Pips</th></tr>`;
     for (const tf of periodTFs) {
@@ -354,7 +354,7 @@ Deno.serve(async (req) => {
 
   // Period's trade history with PnL
   if (tradeHistory.length > 0) {
-    const label = mode === 'monthly' ? 'MONTH' : mode === 'morning' ? 'OVERNIGHT' : "TODAY";
+    const label = mode === 'monthly' ? 'MONTH' : mode === 'morning' ? 'LAST 24 HOURS' : "TODAY";
     html += `<div class="tf-section"><div class="tf-header"><span class="tf-name" style="font-size:16px">📋 ${label}'S CLOSED TRADES (${tradeHistory.length})</span></div>`;
     html += `<table><tr><th>ID</th><th>TF</th><th>Dir</th><th>Entry</th><th>Exit</th><th>TP1</th><th>TPs</th><th>Exit Reason</th><th>PnL Pips</th><th>PnL %</th><th>Duration</th></tr>`;
     for (const t of tradeHistory) {
