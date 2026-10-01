@@ -373,7 +373,9 @@ const MIN_CONFLUENCE: Record<string, number> = {
   '5M': 3,   // Need 3+ TFs aligned
   '15M': 2,  // Need 2+ TFs aligned (less strict for higher TFs)
   '30M': 2,
-  '1H': 2,
+  '1H': 4,   // Raised 2026-10-01: strong-signal requirement. 1H trades last
+             // hours; only enter on a 4+/6 aligned board. Historical 1H
+             // losses came from weak-alignment entries (longs 20% WR).
   '4H': 2,
 };
 
@@ -642,6 +644,7 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
       sl_at_exit: s.sl,
       points: points,
       smart_entry: s.smartEntry || false,
+      gate_ctx: s.gateCtx || null,
     });
 
     // Update cumulative trade_stats via atomic RPC function
@@ -1049,6 +1052,20 @@ Deno.serve(async (req) => {
 
       if (fillLong || fillShort) {
         // Fill the pending entry at limit price
+        // ── Entry scorecard: persist gate context at fill for outcome correlation ──
+        {
+          const dirAtFill = s.pendingDir || (ema9 > ema21 ? 'long' : 'short');
+          const confAtFill = computeConfluence(tvData, dirAtFill === 'long' ? 'long' : 'short');
+          s.gateCtx = {
+            confluence: confAtFill.score,
+            confluence_tf: confAtFill.aligned,
+            dxy: dxyData.dxyBullish === null ? 'neutral' : (dxyData.dxyBullish ? 'bullish' : 'bearish'),
+            dxy_price: dxyData.dxyPrice,
+            rsi: rsi,
+            atr: atr,
+            session_hour: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }),
+          };
+        }
         s.entry = s.pendingEntry;
         s.dir = s.pendingDir;
         s.atr = s.pendingAtr;
