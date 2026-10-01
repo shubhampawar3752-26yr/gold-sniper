@@ -98,6 +98,13 @@ const SESSIONS = {
 // Timeframes that require session filtering (lower TFs are choppy in Asian session)
 const SESSION_FILTERED_TFS = ['1M', '5M'];
 
+// ── DXY override threshold ──
+// Gold can decouple from the dollar (e.g. rallies WITH DXY strength).
+// When 5+/6 timeframes align on a direction, multi-TF confluence is a
+// stronger signal than the DXY inverse-correlation assumption, so the
+// DXY veto is overridden. With a mixed board, DXY still vetoes hard.
+const DXY_OVERRIDE_CONFLUENCE = 5;
+
 function isSessionActive(tf: string, date: Date): boolean {
   // Convert to IST (UTC+5:30)
   const istOffset = 5.5 * 60 * 60 * 1000;
@@ -1155,10 +1162,15 @@ Deno.serve(async (req) => {
       }
 
       // DXY confirmation: gold long needs DXY bearish, gold short needs DXY bullish
+      // Overridden when confluence is strong (gold decouples from DXY in regime moves)
+      const confFirstDxy = computeConfluence(tvData, dir);
       let dxyConfirmedFirst = true;
       if (dxyData.dxyBullish !== null) {
         dxyConfirmedFirst = (dir === 'long' && !dxyData.dxyBullish) || (dir === 'short' && dxyData.dxyBullish);
-        if (!dxyConfirmedFirst) {
+        if (!dxyConfirmedFirst && confFirstDxy.score >= DXY_OVERRIDE_CONFLUENCE) {
+          dxyConfirmedFirst = true;
+          console.log(`[${l}] First run — DXY counter-trend OVERRIDDEN by confluence ${confFirstDxy.score}/${TFS.length}`);
+        } else if (!dxyConfirmedFirst) {
           console.log(`[${l}] First run — DXY counter-trend (gold=${dir}, DXY=${dxyData.dxyBullish ? 'bullish' : 'bearish'})`);
         }
       }
@@ -1240,18 +1252,22 @@ Deno.serve(async (req) => {
       }
 
       // DXY confirmation for All TPs re-entry
+      // Overridden when confluence is strong (gold decouples from DXY in regime moves)
+      const dirAllTP = ema9 > ema21 ? 'long' : 'short';
+      const confAllTPDxy = computeConfluence(tvData, dirAllTP);
       let dxyConfirmedAllTP = true;
       if (dxyData.dxyBullish !== null) {
-        const dirAllTP = ema9 > ema21 ? 'long' : 'short';
         dxyConfirmedAllTP = (dirAllTP === 'long' && !dxyData.dxyBullish) || (dirAllTP === 'short' && dxyData.dxyBullish);
-        if (!dxyConfirmedAllTP) {
+        if (!dxyConfirmedAllTP && confAllTPDxy.score >= DXY_OVERRIDE_CONFLUENCE) {
+          dxyConfirmedAllTP = true;
+          console.log(`[${l}] All TPs — DXY counter-trend OVERRIDDEN by confluence ${confAllTPDxy.score}/${TFS.length}`);
+        } else if (!dxyConfirmedAllTP) {
           console.log(`[${l}] All TPs — DXY counter-trend (gold=${dirAllTP}, DXY=${dxyData.dxyBullish ? 'bullish' : 'bearish'})`);
         }
       }
 
       // Multi-TF confluence for All TPs re-entry
-      const dirAllTP = ema9 > ema21 ? 'long' : 'short';
-      const confluenceAllTP = computeConfluence(tvData, dirAllTP);
+      const confluenceAllTP = confAllTPDxy;
       const confluenceOKAllTP = confluenceAllTP.score >= (MIN_CONFLUENCE[l] || 2);
       if (!confluenceOKAllTP) {
         console.log(`[${l}] All TPs — low confluence: ${confluenceAllTP.score}/${TFS.length} aligned=${confluenceAllTP.aligned.join(',')}`);
@@ -1353,10 +1369,15 @@ Deno.serve(async (req) => {
       }
 
       // DXY confirmation for SL/flip re-entry
+      // Overridden when confluence is strong (gold decouples from DXY in regime moves)
+      const confSLDxy = computeConfluence(tvData, currentLong ? 'long' : 'short');
       let dxyConfirmedSL = true;
       if (dxyData.dxyBullish !== null) {
         dxyConfirmedSL = (currentLong && !dxyData.dxyBullish) || (!currentLong && dxyData.dxyBullish);
-        if (!dxyConfirmedSL) {
+        if (!dxyConfirmedSL && confSLDxy.score >= DXY_OVERRIDE_CONFLUENCE) {
+          dxyConfirmedSL = true;
+          console.log(`[${l}] SL/flip re-entry — DXY counter-trend OVERRIDDEN by confluence ${confSLDxy.score}/${TFS.length}`);
+        } else if (!dxyConfirmedSL) {
           console.log(`[${l}] SL/flip re-entry — DXY counter-trend (gold=${currentLong ? 'long' : 'short'}, DXY=${dxyData.dxyBullish ? 'bullish' : 'bearish'})`);
         }
       }
