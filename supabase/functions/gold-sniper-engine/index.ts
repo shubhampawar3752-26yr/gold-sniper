@@ -25,7 +25,11 @@ const TF_SL_MULT: Record<string, number> = {
   '15M': 2, '30M': 2, '1H': 2, '4H': 2,          // unchanged
 };
 const TF_RR: Record<string, number[]> = {
-  '1M':  [0.4, 1.2, 2.0],    // rescaled for SL=2.5: TP1=1.0xATR TP2=3xATR TP3=5xATR (unchanged levels)
+  '1M':  [0.3, 0.8, 1.4],    // RR restructure 2026-10-02 (post-v47 data, 32 trades): TP1=0.75xATR
+                             // (closer target = higher hit rate, WR 68.8%→~80%); TP2=2.0xATR and
+                             // TP3=3.5xATR — at the old 3.0/5.0 levels ZERO trades ever reached
+                             // TP2, so winners always stalled at TP1+BE while SLs averaged -6.15
+                             // vs +2.48 avg win. Reachable runners now capture more pips.
   '5M':  [0.75, 1.5, 2.5],   // same
   '15M': [1, 2, 3],           // unchanged
   '30M': [1, 2, 3],
