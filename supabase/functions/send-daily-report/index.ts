@@ -379,7 +379,7 @@ Deno.serve(async (req) => {
     const wrClass = p.trades === 0 ? 'wr-neutral' : p.wr >= 60 ? 'wr-good' : p.wr >= 40 ? 'wr-neutral' : 'wr-bad';
 
     html += `<div class="tf-section">`;
-    html += `<div class="tf-header"><span class="tf-name">${tf}</span><span class="tf-winrate ${wrClass}">${p.wr}% WR (${p.wins}W/${p.losses}L)</span></div>`;
+    html += `<div class="tf-header"><span class="tf-name">${tf}</span><span class="tf-winrate ${wrClass}">${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)} pips &middot; ${p.wr}% WR (${p.wins}W/${p.losses}L)</span></div>`;
     html += `<div class="tf-stats">Cycles: ${d.cycles} | Closed: ${p.trades} | Wins: ${p.wins} | Losses: ${p.losses} | TPs: ${d.tps.length} | Full Cycles: ${d.dones.length} | Period Pips: ${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)}</div>`;
 
     // Merge all events sorted by time
