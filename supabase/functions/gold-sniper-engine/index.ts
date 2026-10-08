@@ -30,8 +30,14 @@ const TF_RR: Record<string, number[]> = {
                              // TP3=3.5xATR — at the old 3.0/5.0 levels ZERO trades ever reached
                              // TP2, so winners always stalled at TP1+BE while SLs averaged -6.15
                              // vs +2.48 avg win. Reachable runners now capture more pips.
-  '5M':  [0.75, 1.5, 2.5],   // same
-  '15M': [1, 2, 3],           // unchanged
+  '5M':  [0.5, 1.0, 1.6],    // RR restructure 2026-10-08 (26 trades): TP1 1.875->1.25xATR — 13/26
+                             // straight-to-SL losses (-148 pips) never got BE protection; closer TP1
+                             // banks wins earlier. TP2 3.75->2.5xATR (was reached 6x, avg +15.6),
+                             // TP3 6.25->4.0xATR.
+  '15M': [0.5, 1.0, 1.75],   // RR restructure 2026-10-08 (29 trades): WR 27.6%, -225 pips. Old
+                             // TP1=2xATR = exact SL distance (coin-flip geometry, losing 72% of
+                             // flips); TP2=4xATR reached once in 29. TP1 now 1.0xATR (half of SL
+                             // distance = high hit rate + early BE), TP2 2.0xATR, TP3 3.5xATR.
   '30M': [1, 2, 3],
   '1H':  [1, 2, 3],
   '4H':  [1, 2, 3],
