@@ -182,7 +182,11 @@ Deno.serve(async (req) => {
   // Stats from trade_history (source of truth, not alerts)
   let stats: any = { totalEntries: 0, totalTPs: 0, totalSLs: 0, totalComplete: 0 };
   try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,tp1_hit,tp2_hit,tp3_hit,exit_reason`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
+    // Monthly reset (owner preference 2026-10-08): dashboard stats count the current
+    // IST month only; full history stays in trade_history for analysis/reports.
+    const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const monthStartUTC = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), 1) - 5.5 * 3600 * 1000).toISOString();
+    const r = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,tp1_hit,tp2_hit,tp3_hit,exit_reason&entry_time=gte.${monthStartUTC}`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
     const trades = await r.json();
     stats.totalEntries = trades.length;
     stats.totalTPs = trades.filter((t: any) => t.tp1_hit || t.tp2_hit || t.tp3_hit).length;
