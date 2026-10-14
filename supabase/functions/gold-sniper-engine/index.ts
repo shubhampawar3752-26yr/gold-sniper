@@ -40,7 +40,11 @@ const TF_RR: Record<string, number[]> = {
                              // distance = high hit rate + early BE), TP2 2.0xATR, TP3 3.5xATR.
   '30M': [1, 2, 3],
   '1H':  [1, 2, 3],
-  '4H':  [1, 2, 3],
+  '4H':  [0.5, 1.0, 1.75],  // RR restructure 2026-10-14 (13 trades all-time): WR 23.1%, -216 pips.
+                             // Old TP1=2xATR = exact SL distance (coin-flip geometry, same disease as
+                             // 15M pre-fix); 7 straight-to-SL losses avg -72 each. TP1 now 1.0xATR
+                             // (half SL distance), TP2 2.0xATR, TP3 3.5xATR — winners here run big
+                             // (+154, +226) so runners keep room.
 };
 
 // ── Min ATR filter: skip trades when volatility too low ──
@@ -386,7 +390,9 @@ const MIN_CONFLUENCE: Record<string, number> = {
   '1H': 4,   // Raised 2026-10-01: strong-signal requirement. 1H trades last
              // hours; only enter on a 4+/6 aligned board. Historical 1H
              // losses came from weak-alignment entries (longs 20% WR).
-  '4H': 2,
+  '4H': 3,   // Raised 2026-10-14: old bar of 2/6 = 4H + just one other TF aligned = weak
+             // entries; 7 of 13 all-time losses went straight to full SL. 4H cycles last
+             // days — only enter on a 3+/6 aligned board (provisional, no scorecard data yet).
 };
 
 function computeConfluence(tvData: Record<string, any>, signalDir: 'long' | 'short'): { score: number; aligned: string[]; against: string[] } {
@@ -1140,9 +1146,10 @@ Deno.serve(async (req) => {
           // 5M added 2026-09-26: 40 ema_flip exits = -420 pips, biggest 5M leak.
           // 15M added 2026-09-30: 42 ema_flip exits = -374 pips (43% of 15M trades).
           // 30M/1H added 2026-09-30: 33 flips = -473 pips (53% of 30M) / 15 flips = -345 pips (50% of 1H).
-          // 4H keeps immediate exit (sample too small, flips rare and meaningful).
-          // Shallow whipsaw flips were closing trades that later recovered.
-          if (l === '1M' || l === '5M' || l === '15M' || l === '30M' || l === '1H') {
+          // 4H added 2026-10-14: 4 ema_flip exits = -92 pips in 13 trades (sample was
+          // too small in Sept; 4H now has 13). Shallow whipsaw flips were closing trades that
+          // later recovered. All 6 TFs now on the anti-noise stack.
+          if (l === '1M' || l === '5M' || l === '15M' || l === '30M' || l === '1H' || l === '4H') {
             s.flipExitConfirmCount = (s.flipExitConfirmCount || 0) + 1;
             if (s.flipExitConfirmCount < 3) {
               console.log(`[${l}] EMA flip exit waiting for confirmation (${s.flipExitConfirmCount}/3)`);
