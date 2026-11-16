@@ -146,6 +146,29 @@ async function fetchLivePrice() {
   }
 }
 
+
+// ── Paginated select: PostgREST caps responses at 1000 rows, so a month with
+// more than 1000 trades would silently under-count. Page with Range headers.
+async function supaSelectAll(path: string, pageSize = 1000): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const r = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SUPA_KEY,
+        Authorization: `Bearer ${SUPA_KEY}`,
+        'Range-Unit': 'items',
+        Range: `${from}-${from + pageSize - 1}`,
+      },
+    });
+    if (!r.ok) break;
+    const page = await r.json();
+    if (!Array.isArray(page) || page.length === 0) break;
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
@@ -186,8 +209,7 @@ Deno.serve(async (req) => {
     // IST month only; full history stays in trade_history for analysis/reports.
     const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
     const monthStartUTC = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), 1) - 5.5 * 3600 * 1000).toISOString();
-    const r = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,tp1_hit,tp2_hit,tp3_hit,exit_reason&entry_time=gte.${monthStartUTC}`, { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } });
-    const trades = await r.json();
+    const trades = await supaSelectAll(`trade_history?select=id,tp1_hit,tp2_hit,tp3_hit,exit_reason&entry_time=gte.${monthStartUTC}&order=id.asc`);
     stats.totalEntries = trades.length;
     stats.totalTPs = trades.filter((t: any) => t.tp1_hit || t.tp2_hit || t.tp3_hit).length;
     stats.totalSLs = trades.filter((t: any) => !t.tp1_hit && (t.exit_reason === 'sl_hit' || t.exit_reason === 'ema_flip')).length;

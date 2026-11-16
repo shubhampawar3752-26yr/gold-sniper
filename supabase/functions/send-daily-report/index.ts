@@ -13,6 +13,30 @@ const RECIPIENTS = (Deno.env.get('WHATSAPP_RECIPIENTS') || '').split(',').map(s 
 
 const TFS = ['1M', '5M', '15M', '30M', '1H', '4H'];
 
+// ── Paginated select: PostgREST caps every response at 1000 rows by default.
+// A plain fetch silently truncates past 1000, which froze the ALL-TIME summary
+// at exactly 1000 trades. Page with Range headers instead.
+async function supaSelectAll(path: string, pageSize = 1000): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const r = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SUPA_KEY,
+        Authorization: `Bearer ${SUPA_KEY}`,
+        'Range-Unit': 'items',
+        Range: `${from}-${from + pageSize - 1}`,
+      },
+    });
+    if (!r.ok) { console.error(`supaSelectAll ${path} FAILED (${r.status})`); break; }
+    const page = await r.json();
+    if (!Array.isArray(page) || page.length === 0) break;
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}
+
+
 Deno.serve(async (req) => {
   const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour12: false });
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -24,11 +48,11 @@ Deno.serve(async (req) => {
     if (body?.mode === 'monthly') mode = 'monthly';
   } catch {}
 
-  // Fetch alerts
-  let alertUrl;
+  // Fetch alerts (paginated — a busy month tops 1000 alerts; a plain fetch truncates)
+  let alertPath;
   if (mode === 'morning') {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc&limit=1000`;
+    alertPath = `alerts?select=*,tp&created_at=gte.${since}&order=created_at.asc`;
   } else if (mode === 'monthly') {
     // Monthly: full PREVIOUS month (1st to last day)
     const prevMonth = new Date();
@@ -37,15 +61,12 @@ Deno.serve(async (req) => {
     const monthEnd = prevMonth.toISOString();  // 1st of current month = end boundary
     prevMonth.setMonth(prevMonth.getMonth() - 1);  // 1st of previous month
     const monthStart = prevMonth.toISOString();
-    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${monthStart}&created_at=lt.${monthEnd}&order=created_at.asc&limit=5000`;
+    alertPath = `alerts?select=*,tp&created_at=gte.${monthStart}&created_at=lt.${monthEnd}&order=created_at.asc`;
   } else {
-    alertUrl = `${SUPA_URL}/rest/v1/alerts?select=*,tp&created_at=gte.${today}T00:00:00&order=created_at.asc&limit=1000`;
+    alertPath = `alerts?select=*,tp&created_at=gte.${today}T00:00:00&order=created_at.asc`;
   }
 
-  const r = await fetch(alertUrl, {
-    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-  });
-  const alerts: any[] = await r.json();
+  const alerts: any[] = await supaSelectAll(alertPath);
 
   // Fetch trading state
   const r2 = await fetch(`${SUPA_URL}/rest/v1/trading_states?select=*&limit=1`, {
@@ -74,19 +95,13 @@ Deno.serve(async (req) => {
       const since = `${today}T00:00:00+05:30`;
       historyUrl = `${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,cycle,direction,entry_price,exit_price,tp1_price,tp2_price,tp3_price,tp1_hit,tp2_hit,tp3_hit,tps_hit,exit_reason,pnl_pips,pnl_percent,exit_level,entry_time,exit_time,duration_minutes,smart_entry&created_at=gte.${since}&order=id.asc`;
     }
-    const rh = await fetch(historyUrl, {
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-    });
-    tradeHistory = await rh.json();
+    tradeHistory = await supaSelectAll(historyUrl.replace(`${SUPA_URL}/rest/v1/`, ''));
   } catch (e) { console.error('Trade history fetch failed:', (e as Error).message); }
 
   // Fetch ALL trade_history for cumulative stats
   let allTradeHistory: any[] = [];
   try {
-    const rah = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,timeframe,pnl_pips,pnl_percent,tp1_hit,exit_reason&order=id.asc`, {
-      headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
-    });
-    allTradeHistory = await rah.json();
+    allTradeHistory = await supaSelectAll('trade_history?select=id,timeframe,pnl_pips,pnl_percent,tp1_hit,exit_reason&order=id.asc');
   } catch (e) { console.error('All trade history fetch failed:', (e as Error).message); }
 
   // Fetch trade_stats per timeframe
@@ -115,11 +130,7 @@ Deno.serve(async (req) => {
   const periodWorst = tradeHistory.length > 0 ? Math.min(...tradeHistory.map((t: any) => parseFloat(t.pnl_pips || 0))) : 0;
 
   // Fetch ALL entry alerts for time-based entry price lookup
-  const rEntries = await fetch(
-    `${SUPA_URL}/rest/v1/alerts?type=eq.entry&select=id,type,timeframe,direction,entry,sl,tp,cycle,price,created_at&order=created_at.asc&limit=2000`,
-    { headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` } }
-  );
-  const allEntryAlerts: any[] = await rEntries.json();
+  const allEntryAlerts: any[] = await supaSelectAll('alerts?type=eq.entry&select=id,type,timeframe,direction,entry,sl,tp,cycle,price,created_at&order=created_at.asc');
 
   // Per-TF sorted entry list
   const tfEntries: Record<string, any[]> = {};

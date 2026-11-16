@@ -593,6 +593,29 @@ async function supaUpdate(table: string, data: any, id: number) {
   if (!r.ok) console.error(`Update ${table} FAILED (${r.status})`);
 }
 
+// ── Paginated select: PostgREST caps every response at 1000 rows (db-max-rows),
+// so a plain fetch silently truncates once a table passes 1000 rows. That froze
+// trade_summary.total_trades at exactly 1000. Page with Range headers instead.
+async function supaSelectAll(path: string, pageSize = 1000): Promise<any[]> {
+  const out: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const r = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SUPA_KEY,
+        Authorization: `Bearer ${SUPA_KEY}`,
+        'Range-Unit': 'items',
+        Range: `${from}-${from + pageSize - 1}`,
+      },
+    });
+    if (!r.ok) { console.error(`supaSelectAll ${path} FAILED (${r.status})`); break; }
+    const page = await r.json();
+    if (!Array.isArray(page) || page.length === 0) break;
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}
+
 
 
 // ── Record closed trade in trade_history table ──
@@ -690,12 +713,8 @@ async function recordTradeHistory(s: any, l: string, exitPrice: number, exitReas
 
 // ── Update overall trade_summary table (all timeframes combined) ──
 async function updateTradeSummary() {
-  // Get all trades
-  const r = await fetch(`${SUPA_URL}/rest/v1/trade_history?select=id,pnl_pips,pnl_percent,tp1_hit,tp2_hit,tp3_hit,exit_reason,timeframe`, {
-    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
-  });
-  if (!r.ok) return;
-  const trades = await r.json();
+  // Get all trades (paginated: table is past 1000 rows, a plain fetch truncates)
+  const trades = await supaSelectAll('trade_history?select=id,pnl_pips,pnl_percent,tp1_hit,tp2_hit,tp3_hit,exit_reason,timeframe&order=id.asc');
   if (!trades.length) return;
 
   // Get all trade_stats for best/worst TF
